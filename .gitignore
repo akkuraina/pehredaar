@@ -1,0 +1,21 @@
+# Binaries
+/pehredaar
+*.exe
+/bin/
+
+# Local data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/data/
+
+# Secrets
+.env
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
