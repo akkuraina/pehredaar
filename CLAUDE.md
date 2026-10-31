@@ -79,6 +79,13 @@ internal/
 4. Telegram bot flow.
 5. LLM summaries and importance classification.
 
+## Design
+
+Full architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Keep it
+current when design decisions change. Decided so far: feed-level
+subscriptions in v1; feeds = notice-boards, ssc-calendar, admit-card,
+answer-key, results, tentative-vacancy; each watched in English and Hindi.
+
 ## Verified source notes (SSC, checked 2026-10-30)
 
 - `ssc.gov.in` is an Angular SPA: the HTML is an empty shell, so scraping it
@@ -92,6 +99,10 @@ internal/
 - Attachments: `https://ssc.gov.in/api/attachment/<path>` (path from JSON,
   backslashes → `/`). PDFs send `Last-Modified` and `ETag`; `pdftotext -layout`
   extracts them cleanly (corrigenda are text PDFs, not scans, in samples seen).
+- `language=hindi` is a separate, smaller, lagging feed (different item ids).
+  Hindi headlines are clean Unicode, but Hindi PDF text from `pdftotext` is
+  garbled (broken matras/glyph maps); digits and dates survive. Don't feed
+  that text to the LLM as prose.
 
 ## Conventions
 
