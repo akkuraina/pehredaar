@@ -344,7 +344,7 @@ Noise filtering is applied in layers. Each layer is cheap and testable against f
 | Layer | Feed (JSON) | PDF | HTML (future) |
 |---|---|---|---|
 | 1. Extract | Parse JSON, keep only `keep_fields` per item (drops `isCache`, pagination, etc.) | `pdftotext -layout -enc UTF-8` (temp file, timeout, size cap) | goquery: keep `content_selector`, drop `script, style, nav, header, footer` + `drop_selectors` |
-| 2. Canonicalize | One line per item, **sorted by id**, fields in fixed order | Unicode NFC, collapse runs of spaces, trim lines, drop empty lines | Same as PDF |
+| 2. Canonicalize | One line per item, sorted newest-first by `createdAt` then id (content-determined, independent of API order), fields in fixed order | Unicode NFC, collapse runs of spaces, trim lines, drop empty lines | Same as PDF |
 | 3. Per-source regex | Rarely needed | Strip page numbers ("Page 3 of 7"), print timestamps | Visitor counters, "Last updated …" |
 | 4. Hash | SHA-256 of canonical text | ← same | ← same |
 | 5. Diff-level filter | — | Ignore diffs that are whitespace/punctuation only | ← same |
