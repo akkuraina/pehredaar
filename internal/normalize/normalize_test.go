@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -76,6 +77,25 @@ func TestSSCFeedGolden(t *testing.T) {
 			}
 			checkGolden(t, name, doc.Text)
 		})
+	}
+}
+
+func TestSSCCalendar(t *testing.T) {
+	body := readFixture(t, "ssc_calendar_en.json")
+	doc := normalize(t, feedSource, body)
+	if len(doc.Items) != 13 {
+		t.Errorf("got %d items, want 13", len(doc.Items))
+	}
+	checkGolden(t, "ssc_calendar_en", doc.Text)
+
+	// The calendar's `content` field is the exam schedule: the single most
+	// important thing to notice changing. Guard against dropping it.
+	moved := bytes.Replace(body, []byte(`"content":"May 2026"`), []byte(`"content":"June 2026"`), 1)
+	if bytes.Equal(moved, body) {
+		t.Fatal("fixture no longer contains the expected calendar entry")
+	}
+	if normalize(t, feedSource, moved).Hash == doc.Hash {
+		t.Error("calendar schedule change did not change the hash")
 	}
 }
 

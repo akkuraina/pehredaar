@@ -1,0 +1,13 @@
+x3p9d7kq2v4t1r8fgq123 | 2026-01-12T07:27:56.783Z | JSA / LDC Grade Limited Departmental Competitive Examination, 2025 (for DoPT only) | desc: Paper-I (CBE) | content: May 2026 | start: 2026-03-16 | end: 2026-04-07
+x3p9d7kq2v4t1r8fgq124 | 2026-01-12T07:27:56.783Z | SSA / UDC Grade Limited Departmental Competitive Examination, 2025 (for DoPT only) | desc: Paper-I (CBE) | content: May 2026 | start: 2026-03-16 | end: 2026-04-07
+x3p9d7kq2v4t1r8fgq125 | 2026-01-12T07:27:56.783Z | ASO Grade Limited Departmental Competitive Examination, 2025 | desc: Paper-I (CBE) | content: May 2026 | start: 2026-03-16 | end: 2026-04-07
+x3p9d7kq2v4t1r8fgq126 | 2026-01-12T07:27:56.783Z | Combined Graduate Level Examination, 2026 | desc: Tier-I (CBE) | content: May – June 2026 | start: 2026-03-31 | end: 2026-04-30
+x3p9d7kq2v4t1r8fgq127 | 2026-01-12T07:27:56.783Z | Junior Engineer (Civil, Mechanical & Electrical) Examination, 2026 | desc: Paper-I (CBE) | content: May – June 2026 | start: 2026-03-31 | end: 2026-04-30
+x3p9d7kq2v4t1r8fgq128 | 2026-01-12T07:27:56.783Z | Selection Post Examination, Phase-XIV, 2026 | desc: CBE | content: May – July 2026 | start: 2026-03-31 | end: 2026-04-30
+x3p9d7kq2v4t1r8fgq129 | 2026-01-12T07:27:56.783Z | Combined Higher Secondary (10+2) Level Examination, 2026 | desc: Tier-I (CBE) | content: July – September 2026 | start: 2026-04-30 | end: 2026-05-31
+x3p9d7kq2v4t1r8fgq130 | 2026-01-12T07:27:56.783Z | Stenographer Grade ‘C’ & ‘D’ Examination, 2026 | desc: CBE | content: August – September 2026 | start: 2026-04-30 | end: 2026-05-31
+x3p9d7kq2v4t1r8fgq131 | 2026-01-12T07:27:56.783Z | Combined Hindi Translators Examination, 2026 | desc: Paper-I (CBE) | content: August – September 2026 | start: 2026-04-30 | end: 2026-05-31
+x3p9d7kq2v4t1r8fgq132 | 2026-01-12T07:27:56.783Z | Multi-Tasking (Non-Technical) Staff & Havaldar (CBIC & CBN) Examination, 2026 | desc: CBE | content: September – November 2026 | start: 2026-06-30 | end: 2026-07-31
+x3p9d7kq2v4t1r8fgq133 | 2026-01-12T07:27:56.783Z | Sub-Inspector in Delhi Police & Central Armed Police Forces Examination, 2026 | desc: Paper-I (CBE) | content: October – November 2026 | start: 2026-05-31 | end: 2026-06-30
+x3p9d7kq2v4t1rnavy125 | 2026-01-12T07:27:56.783Z | Indian Navy Entrance Test (INET) - [Agniveer (MR as SSR ) and SSR (Medical)] | desc: Paper-I (CBE) | content: May 2026 | start: 2026-03-14 | end: 2026-04-06
+x3p9d7kq4v2t1rnavy125 | 2026-01-12T07:26:56.783Z | Indian Navy Entrance Test ( INET ) - [Agniveer (Apprentice)] | desc: Paper-I (CBE) | content: Aug 2026 | start: 2026-06-05 | end: 2026-06-29

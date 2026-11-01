@@ -43,6 +43,8 @@ type Doc struct {
 type FeedItem struct {
 	ID          string
 	Headline    string
+	Desc        string // SSC calendar: exam tier
+	Content     string // SSC calendar: exam schedule
 	CreatedAt   string // as the API reports it (RFC 3339)
 	StartDate   string
 	EndDate     string

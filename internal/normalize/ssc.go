@@ -23,6 +23,8 @@ type sscEnvelope struct {
 type sscItem struct {
 	ID          string          `json:"id"`
 	Headline    string          `json:"headline"`
+	Desc        string          `json:"desc"`    // calendar: tier, e.g. "Tier-I (CBE)"
+	Content     string          `json:"content"` // calendar: exam schedule, e.g. "May – June 2026"
 	CreatedAt   string          `json:"createdAt"`
 	StartDate   *string         `json:"startDate"` // null in most items
 	EndDate     *string         `json:"endDate"`
@@ -69,6 +71,8 @@ func normalizeSSCFeed(body []byte, feedURL string, rules Rules) (Doc, error) {
 		it := FeedItem{
 			ID:          raw.ID,
 			Headline:    oneLine(raw.Headline),
+			Desc:        oneLine(raw.Desc),
+			Content:     oneLine(raw.Content),
 			CreatedAt:   raw.CreatedAt,
 			StartDate:   deref(raw.StartDate),
 			EndDate:     deref(raw.EndDate),
@@ -110,6 +114,13 @@ func normalizeSSCFeed(body []byte, feedURL string, rules Rules) (Doc, error) {
 // missing one look the same.
 func (it FeedItem) canonicalLine() string {
 	parts := []string{it.ID, it.CreatedAt, it.Headline}
+	// Labels reuse SSC's own field names rather than guessing at meaning.
+	if it.Desc != "" {
+		parts = append(parts, "desc: "+it.Desc)
+	}
+	if it.Content != "" {
+		parts = append(parts, "content: "+it.Content)
+	}
 	if it.StartDate != "" {
 		parts = append(parts, "start: "+it.StartDate)
 	}
