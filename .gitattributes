@@ -1,0 +1,5 @@
+# Store text with LF endings everywhere; Go tooling expects LF.
+* text=auto eol=lf
+
+# Test fixtures must stay byte-for-byte identical.
+*.pdf binary
