@@ -99,6 +99,17 @@ answer-key, results, tentative-vacancy; each watched in English and Hindi.
 - Attachments: `https://ssc.gov.in/api/attachment/<path>` (path from JSON,
   backslashes → `/`). PDFs send `Last-Modified` and `ETag`; `pdftotext -layout`
   extracts them cleanly (corrigenda are text PDFs, not scans, in samples seen).
+- Verified feed endpoints (2026-11-01), all under `/api/general-website/portal/`:
+  `notice-boards`, `ssc-calendar` (needs `&year=YYYY`; ignores `limit`,
+  returns the whole year), and `records` with `contentType=` `admit-card`,
+  `answer-key`, `results`, `tentative-vacancy`. Exact query strings are the
+  ones the site's own JS sends; see `pehredaar probe` usage in git history.
+- Calendar items carry the exam schedule in `content` ("May – June 2026")
+  and tier in `desc`; `startDate`/`endDate` are also set. All must be kept.
+- English `admit-card` feed is stale (2 items, from 2024). Low value.
+- The server honours conditional GET: feeds (weak ETag, content-derived, so
+  stable across days) and PDFs (ETag + Last-Modified) return 304 in ~60ms
+  vs ~3s for a full fetch. A PDF's Last-Modified equals its notice's createdAt.
 - `language=hindi` is a separate, smaller, lagging feed (different item ids).
   Hindi headlines are clean Unicode, but Hindi PDF text from `pdftotext` is
   garbled (broken matras/glyph maps); digits and dates survive. Don't feed
