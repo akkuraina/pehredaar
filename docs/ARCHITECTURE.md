@@ -101,9 +101,10 @@ internal/
   fetcher/              HTTP client, robots.txt, per-host rate limit, conditional GET, PDF download
   normalize/            raw bytes → canonical text (per kind + per-source rules)
   differ/               canonical text A vs B → structured Diff
-  summarizer/           Summarizer interface; LLM impl; fake impl for tests
-  notifier/             Notifier interface; Telegram sender; bot command handlers
-  scheduler/            polling loop, worker pool, backoff, change pipeline orchestration
+  summarizer/           Summarizer interface; template impl (also the fallback); LLM impl
+  notifier/             Telegram: alert sending (rate limits, retries), bot command handlers
+  outbox/               pending changes → summaries → routed alerts (§7)
+  scheduler/            polling loop, worker pool, backoff, fetch→normalize→diff→save
   dashboard/            local operator web UI (html/template, read-mostly)
 testdata/               saved JSON/PDF/HTML fixtures (shared by tests)
 docs/                   this file and future design notes
@@ -442,9 +443,15 @@ webhook is needed while running on a laptop.
 |---|---|
 | `/start` | Register subscriber, pick alert language (English / हिन्दी), show `/watch` |
 | `/language` | Change alert language |
-| `/watch` | Inline keyboard of categories; tap to subscribe |
+| `/watch` | Inline keyboard of categories (✅ on watched ones); tap to subscribe |
 | `/list`  | Current subscriptions with an inline "stop" button each |
 | `/stop`  | Inline keyboard of current subscriptions to remove (`/stop all` to clear) |
+
+Bot messages follow the subscriber's language. Button taps edit the message
+in place rather than sending new ones. Category names are the `label`s from
+`sources.yaml` (the first entry per category). Any other private message gets
+the help text. Messages use Telegram's HTML parse mode, since only `<>&`
+need escaping (MarkdownV2 reserves `.-()`, which are everywhere in notices).
 
 Alert format:
 
@@ -455,8 +462,16 @@ SI Delhi Police CBE now 23–28 Nov.
 📄 <link to PDF>
 ```
 
+Until the LLM summarizer exists, the text is a template built from the diff:
+"New notice / Notice updated / Notice removed: <headline>" with changed fields
+paired (`Start date: 1 May 2026 → 1 Jul 2026`, timestamps shown in IST), or
+for PDFs "Document updated: <label>" with up to 3 Was/Now lines. Hindi PDFs
+are never quoted (garbled text). Links: the PDF itself, or the attachments of
+new/edited feed items (max 3). Link previews are off.
+
 Sending respects Telegram limits (≈30 msgs/s globally, 1/s per chat) with a
-limiter. A 403 "bot was blocked" response marks the subscriber `active=false`.
+limiter. A 403 "bot was blocked" response marks the subscriber `active=false`;
+any later message to the bot (e.g. `/start`) reactivates them.
 
 ---
 
@@ -507,7 +522,8 @@ before trusting the pipeline.
 | Body is an error page / empty / JSON `statusCode != "200"` | **Not a change.** Counts as a failed check. Never snapshot it (otherwise "page → error → page" alerts twice) |
 | `pdftotext` fails / no text (scanned PDF) | Mark source as `needs-ocr`, skip. No alert |
 | LLM failure | Change stays `pending`, retried. Fallback template after N attempts (§10) |
-| Telegram failure | Retried per subscriber. `deliveries` prevents duplicates |
+| Telegram failure | Delivery is **marked, then sent** (decided 2026-11-02): no user ever gets an alert twice, at the cost of possibly losing one. `Send` retries flood control (429, honoring `retry_after`, capped at 1 min) and network/5xx errors up to 4 attempts; 400s aren't retried. 403 marks the subscriber inactive |
+| Bot off for a while | Changes stay `pending`. On restart, ones older than 72h are closed without alerting, so users aren't flooded with stale news |
 
 Operator visibility: structured logs via `log/slog`. Later, an optional
 `ADMIN_CHAT_ID` gets a daily health digest (sources failing, changes sent).
@@ -522,8 +538,8 @@ All secrets are env vars, loaded once in `config`, never logged, and never commi
 |---|---|---|
 | `PEHREDAAR_DB` | SQLite path | `./data/pehredaar.db` |
 | `PEHREDAAR_SOURCES` | Sources file | `./sources.yaml` |
-| `TELEGRAM_BOT_TOKEN` | Bot token | required for `run` |
-| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | Summarizer | required for `run` |
+| `TELEGRAM_BOT_TOKEN` | Bot token. Unset: `run` warns and runs without the bot and outbox (changes are still detected, and stay pending) | unset |
+| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | Summarizer (milestone 5) | not used yet: template summaries |
 | `PDFTOTEXT_PATH` | Override binary | `pdftotext` on PATH |
 | `PEHREDAAR_WORKERS` | Pool size | `4` |
 | `PEHREDAAR_HTTP` | Dashboard address (loopback only) | `127.0.0.1:8787` |
@@ -545,8 +561,12 @@ workers write concurrently. Driver: `modernc.org/sqlite` (pure Go, no cgo).
   size caps. No live network in `go test`.
 - **store:** tests against a temp-file SQLite. The same test suite will later
   run against Postgres to prove the interface holds.
-- **scheduler:** end-to-end with fake fetcher, fake summarizer and fake notifier.
-  Asserts "one change → one alert per subscriber", even across a simulated crash.
+- **scheduler:** end-to-end with a fake fetcher and a temp-file store.
+- **outbox:** real store, fake notifier and summarizer. Asserts "one change →
+  one alert per subscriber", even across a simulated crash; language routing;
+  blocked users; summarizer fallback; cosmetic suppression.
+- **notifier:** command logic against a real store, `Send` against a fake
+  Bot API. No test talks to Telegram.
 - PDF tests need `pdftotext` and are skipped (`t.Skip`) if it's missing.
 
 ---

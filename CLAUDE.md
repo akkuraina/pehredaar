@@ -58,8 +58,9 @@ internal/
   fetcher/      # HTTP + PDF fetching, robots.txt, rate limiting
   normalize/    # strip noise, extract text
   differ/       # compare snapshots
-  summarizer/   # LLM calls
-  notifier/     # Telegram
+  summarizer/   # change → alert text (template now, LLM later)
+  notifier/     # Telegram bot: commands + sending
+  outbox/       # pending changes → summaries → alerts
   store/        # DB access (interface + SQLite impl)
   scheduler/    # polling loop
   config/       # sources.yaml loading + sync
@@ -71,7 +72,8 @@ sources.yaml    # curated sources
 
 ```
 go build -o bin/pehredaar.exe ./cmd/pehredaar
-bin/pehredaar.exe run            # scheduler + dashboard at http://127.0.0.1:8787
+$env:TELEGRAM_BOT_TOKEN = "..."  # optional; without it, no bot and no alerts
+bin/pehredaar.exe run            # scheduler + bot + dashboard at http://127.0.0.1:8787
 bin/pehredaar.exe probe <url>    # inspect one URL without touching the DB
 ```
 

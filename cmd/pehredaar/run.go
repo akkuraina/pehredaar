@@ -19,8 +19,11 @@ import (
 	"github.com/akkuraina/pehredaar/internal/dashboard"
 	"github.com/akkuraina/pehredaar/internal/fetcher"
 	"github.com/akkuraina/pehredaar/internal/normalize"
+	"github.com/akkuraina/pehredaar/internal/notifier"
+	"github.com/akkuraina/pehredaar/internal/outbox"
 	"github.com/akkuraina/pehredaar/internal/scheduler"
 	"github.com/akkuraina/pehredaar/internal/store/sqlite"
+	"github.com/akkuraina/pehredaar/internal/summarizer"
 )
 
 // runServe is `pehredaar run`: sync sources.yaml, then run the scheduler
@@ -91,8 +94,32 @@ func runServe(ctx context.Context, args []string) error {
 	// errgroup runs the scheduler and the web server side by side. If either
 	// fails, gctx is cancelled and the other one shuts down too; Wait
 	// returns the first error.
+	// The bot and the outbox only run with a token. Without one, changes
+	// are still detected and stay pending; they go out once a token is set
+	// (unless older than outbox.MaxAge).
+	var tg *notifier.Bot
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+		tg, err = notifier.New(token, st, sources.Categories(), log)
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Warn("TELEGRAM_BOT_TOKEN is not set: running without the Telegram bot; no alerts will be sent")
+	}
+
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sched.Run(gctx) })
+	if tg != nil {
+		proc := outbox.New(outbox.Config{
+			Store:      st,
+			Summarizer: summarizer.Template{},
+			Notifier:   tg,
+			Categories: sources.Categories(),
+			Logger:     log,
+		})
+		g.Go(func() error { return tg.Run(gctx) })
+		g.Go(func() error { return proc.Run(gctx) })
+	}
 	g.Go(func() error {
 		log.Info("dashboard listening", "url", "http://"+*addr)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
