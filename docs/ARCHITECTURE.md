@@ -18,7 +18,8 @@ Read alongside [`CLAUDE.md`](../CLAUDE.md), which holds the product brief.
 
 **Non-goals (v1)**
 
-- User-submitted URLs, a web UI, other exam families, JS rendering (chromedp),
+- User-submitted URLs, a public web UI (the local operator dashboard, §18, is
+  not one), other exam families, JS rendering (chromedp),
   OCR of scanned PDFs, multi-instance deployment.
 
 ---
@@ -103,6 +104,7 @@ internal/
   summarizer/           Summarizer interface; LLM impl; fake impl for tests
   notifier/             Notifier interface; Telegram sender; bot command handlers
   scheduler/            polling loop, worker pool, backoff, change pipeline orchestration
+  dashboard/            local operator web UI (html/template, read-mostly)
 testdata/               saved JSON/PDF/HTML fixtures (shared by tests)
 docs/                   this file and future design notes
 ```
@@ -252,33 +254,35 @@ Curated sources live in a checked-in **`sources.yaml`**, synced into the DB
 on startup (upsert by URL; sources removed from the file are disabled, not deleted):
 
 ```yaml
-- label: SSC Notice Board
-  kind: feed
-  category: ssc:notice-board
-  languages: [en, hi]            # expands to two sources; {lang} → english / hindi
-  url: https://ssc.gov.in/api/general-website/portal/notice-boards?page=1&limit=10&contentType=notice-boards&language={lang}&...
-  interval: 15m
-  feed:
-    discover_attachments: true   # create pdf child sources for new items
-    windowed: true               # page 1 of a longer list; items scroll (see section 9)
-    keep_fields: [id, headline, createdAt, attachments.path]
-- label: SSC Calendar
-  kind: feed
-  category: ssc:calendar
-  languages: [en, hi]
-  url: ...                       # needs &year=YYYY; returns the whole year
-  interval: 1h
-  feed:
+discovered_interval: 6h          # re-check interval for PDFs found in feeds
+sources:
+  - label: SSC Notice Board
+    kind: feed
+    category: ssc:notice-board
+    languages: [en, hi]          # one source per language; {lang} -> english / hindi
+    url: https://ssc.gov.in/api/general-website/portal/notice-boards?page=1&limit=10&...&language={lang}&...
+    interval: 15m
+    windowed: true               # page 1 of a longer list; items scroll (section 9)
+    discover_attachments: true   # watch PDFs attached to the feed's items
+    drop_lines: []               # optional per-source noise regexes
+  - label: SSC Calendar
+    kind: feed
+    category: ssc:calendar
+    languages: [en]              # the Hindi calendar is empty
+    url: ...&year={year}&...     # {year} = current year; returns the whole year
+    interval: 1h
     windowed: false              # complete list: a missing item is a removal
 ```
 
 **v1 feeds (decided):** notice-boards, ssc-calendar, admit-card, answer-key,
-results, tentative-vacancy, each in English and Hindi, so 12 curated
-sources plus discovered PDFs. Exact query strings are copied from what the
+results, tentative-vacancy in English; notice-boards, answer-key and results
+also in Hindi (SSC's Hindi calendar, admit-card and tentative-vacancy feeds
+are empty), so 9 curated sources plus discovered PDFs. Unknown yaml fields
+are rejected, so typos fail at startup. Exact query strings are copied from what the
 SSC site itself sends (§2) and verified with `probe` before going in the file.
 
-**Discovery.** When a feed contains an item we haven't seen, its attachments
-become `pdf` child sources (same host only, `parent_id` set). They're watched
+**Discovery.** Whenever a feed's content changes (and at its baseline), the
+attachments of its current items become `pdf` child sources (same host only, `parent_id` set). They're watched
 on a slower interval (e.g. 6h) and retired after a configurable age (e.g. 120
 days) so the watch set doesn't grow forever. This is *not* "add any URL":
 only attachments of curated feeds on the curated host are followed.
@@ -522,6 +526,7 @@ All secrets are env vars, loaded once in `config`, never logged, and never commi
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | Summarizer | required for `run` |
 | `PDFTOTEXT_PATH` | Override binary | `pdftotext` on PATH |
 | `PEHREDAAR_WORKERS` | Pool size | `4` |
+| `PEHREDAAR_HTTP` | Dashboard address (loopback only) | `127.0.0.1:8787` |
 
 SQLite opened with WAL mode and `busy_timeout`, since the bot and the
 workers write concurrently. Driver: `modernc.org/sqlite` (pure Go, no cgo).
@@ -569,3 +574,24 @@ the six feeds in §6; English **and** Hindi.
 | 4 | `notifier` + bot | `/watch` `/list` `/stop` work. Templated alerts sent end-to-end |
 | 5 | `summarizer` | LLM summaries + importance. Cosmetic suppressed. Fallback path tested |
 | 6 | `scheduler` hardening | Backoff, discovery/retirement, crash-safety test |
+
+---
+
+## 18. Local operator dashboard
+
+Not part of the user product (users only ever see Telegram). It exists so the
+operator can watch the pipeline work while it is being built and run.
+
+- Served by `pehredaar run` next to the scheduler (one process, `errgroup`),
+  at `http://127.0.0.1:8787`. It has no login, so `run` refuses any
+  non-loopback address. Cross-site POSTs are rejected
+  (`http.CrossOriginProtection`).
+- Pages: overview (feeds, failing sources, recent changes, activity log,
+  discovered PDFs; auto-reloads every 30s), source detail (metadata, "check
+  now", snapshots, latest canonical text, child PDFs), change (coloured
+  diff), snapshot (raw canonical text).
+- Reads through a narrow `dashboard.Store` interface (no writes); the
+  activity log is the scheduler's in-memory ring of the last 300 checks,
+  so it resets on restart.
+- Server-rendered `html/template` with embedded templates, no JS framework;
+  all stored text is auto-escaped.

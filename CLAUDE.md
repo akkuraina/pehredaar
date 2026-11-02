@@ -62,7 +62,21 @@ internal/
   notifier/     # Telegram
   store/        # DB access (interface + SQLite impl)
   scheduler/    # polling loop
+  config/       # sources.yaml loading + sync
+  dashboard/    # local operator web UI (not user-facing)
+sources.yaml    # curated sources
 ```
+
+## Running
+
+```
+go build -o bin/pehredaar.exe ./cmd/pehredaar
+bin/pehredaar.exe run            # scheduler + dashboard at http://127.0.0.1:8787
+bin/pehredaar.exe probe <url>    # inspect one URL without touching the DB
+```
+
+State lives in `data/pehredaar.db` (gitignored). Delete it to start fresh.
+Port 8080 is taken by a local Apache on the dev machine, hence 8787.
 
 ## Core tables
 
@@ -84,7 +98,8 @@ internal/
 Full architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Keep it
 current when design decisions change. Decided so far: feed-level
 subscriptions in v1; feeds = notice-boards, ssc-calendar, admit-card,
-answer-key, results, tentative-vacancy; each watched in English and Hindi.
+answer-key, results, tentative-vacancy; in English, plus Hindi where SSC has
+a Hindi feed (notice-boards, answer-key, results).
 
 ## Verified source notes (SSC, checked 2026-10-30)
 
@@ -111,6 +126,9 @@ answer-key, results, tentative-vacancy; each watched in English and Hindi.
   stable across days) and PDFs (ETag + Last-Modified) return 304 in ~60ms
   vs ~3s for a full fetch. A PDF's Last-Modified equals its notice's createdAt.
 - `language=hindi` is a separate, smaller, lagging feed (different item ids).
+  Hindi `ssc-calendar`, `admit-card` and `tentative-vacancy` are empty
+  (`totalRecords: 0`, 2026-11-02), so they are English-only in sources.yaml.
+  Hindi `answer-key` ignores `limit` (returned 20, `totalPerpage` 25).
   Hindi headlines are clean Unicode, but Hindi PDF text from `pdftotext` is
   garbled (broken matras/glyph maps); digits and dates survive. Don't feed
   that text to the LLM as prose.
