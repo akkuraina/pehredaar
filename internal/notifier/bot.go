@@ -50,6 +50,10 @@ func New(token string, st Store, cats []config.Category, log *slog.Logger) (*Bot
 	}
 	b := newBot(nil, st, cats, log)
 	tg, err := bot.New(token,
+		// The startup getMe check defaults to 5s, which one slow moment on
+		// Wi-Fi can exceed; a bad token still fails fast (Telegram answers
+		// 401 straight away).
+		bot.WithCheckInitTimeout(30*time.Second),
 		bot.WithDefaultHandler(b.onOther),
 		bot.WithCallbackQueryDataHandler("", bot.MatchTypePrefix, b.onCallback),
 		bot.WithErrorsHandler(func(err error) {
