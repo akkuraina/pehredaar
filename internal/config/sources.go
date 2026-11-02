@@ -25,6 +25,10 @@ import (
 type Source struct {
 	store.Source // URL, Kind, Category, Language, Label, CheckInterval, Enabled
 
+	// CategoryLabel is the entry's label without a language suffix
+	// ("SSC Notice Board"), used to name the category to subscribers.
+	CategoryLabel string
+
 	Windowed            bool // feed is one page of a longer list; see differ.Options
 	DiscoverAttachments bool // watch PDFs linked from the feed's items
 	Rules               normalize.Rules
@@ -36,6 +40,28 @@ type Sources struct {
 
 	// DiscoveredInterval is how often PDFs found in feeds are re-checked.
 	DiscoveredInterval time.Duration
+}
+
+// Category is a subscription unit as shown to users.
+type Category struct {
+	ID    string // e.g. "ssc:notice-board"
+	Label string // e.g. "SSC Notice Board"
+}
+
+// Categories lists the categories of enabled sources in file order, which
+// is the order users see them in the bot. A category's label comes from
+// its first enabled entry.
+func (s Sources) Categories() []Category {
+	var out []Category
+	seen := make(map[string]bool)
+	for _, src := range s.List {
+		if !src.Enabled || seen[src.Category] {
+			continue
+		}
+		seen[src.Category] = true
+		out = append(out, Category{ID: src.Category, Label: src.CategoryLabel})
+	}
+	return out
 }
 
 // ByURL indexes the curated sources by URL, which is how the scheduler
@@ -191,6 +217,7 @@ func expand(y sourceYAML, now time.Time) ([]Source, error) {
 				CheckInterval: interval,
 				Enabled:       enabled,
 			},
+			CategoryLabel:       y.Label,
 			Windowed:            y.Windowed,
 			DiscoverAttachments: y.DiscoverAttachments,
 			Rules:               rules,

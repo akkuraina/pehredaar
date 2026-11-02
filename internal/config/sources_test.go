@@ -75,6 +75,27 @@ sources:
 	if byURL := s.ByURL(); byURL[hi.URL].Label != hi.Label {
 		t.Error("ByURL lookup failed")
 	}
+	// Both languages share one category, named without the "(hindi)" suffix.
+	if cats := s.Categories(); len(cats) != 1 || cats[0] != (Category{ID: "x:board", Label: "Board"}) {
+		t.Errorf("Categories() = %+v", cats)
+	}
+}
+
+func TestCategoriesSkipDisabled(t *testing.T) {
+	s, err := ParseSources([]byte(`
+sources:
+  - {label: Old, kind: feed, category: x:old, languages: [en], url: "https://example.test/old", interval: 1h, enabled: false}
+  - {label: B, kind: feed, category: x:b, languages: [en], url: "https://example.test/b", interval: 1h}
+  - {label: A, kind: feed, category: x:a, languages: [en], url: "https://example.test/a", interval: 1h}
+`), testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// File order, not alphabetical; disabled categories are not offered.
+	want := []Category{{"x:b", "B"}, {"x:a", "A"}}
+	if got := s.Categories(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Categories() = %+v, want %+v", got, want)
+	}
 }
 
 func TestParseErrors(t *testing.T) {
