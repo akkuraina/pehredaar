@@ -103,7 +103,8 @@ Port 8080 is taken by a local Apache on the dev machine, hence 8787.
 ## Design
 
 Full architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Keep it
-current when design decisions change. Decided so far: feed-level
+current when design decisions change, along with `README.md` (what it does
+today, setup) and `docs/SCALING.md` (growth plan). Decided so far: feed-level
 subscriptions in v1; feeds = notice-boards, ssc-calendar, admit-card,
 answer-key, results, tentative-vacancy; in English, plus Hindi where SSC has
 a Hindi feed (notice-boards, answer-key, results).
