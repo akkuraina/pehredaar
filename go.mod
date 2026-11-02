@@ -3,6 +3,7 @@ module github.com/akkuraina/pehredaar
 go 1.27.0
 
 require (
+	github.com/anthropics/anthropic-sdk-go/v2 v2.4.0
 	github.com/go-telegram/bot v1.27.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/temoto/robotstxt v1.1.2
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go/v2 v2.4.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect

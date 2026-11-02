@@ -116,12 +116,23 @@ func runServe(ctx context.Context, args []string) error {
 		log.Warn("TELEGRAM_BOT_TOKEN is not set: running without the Telegram bot; no alerts will be sent")
 	}
 
+	// Claude writes the summaries when a key is set; otherwise alerts use
+	// the plain template (which is also the fallback when the API is down).
+	var sum summarizer.Summarizer = summarizer.Template{}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		model := envOr("PEHREDAAR_LLM_MODEL", summarizer.DefaultModel)
+		sum = summarizer.NewClaude(key, model, log)
+		log.Info("summaries by Claude", "model", model)
+	} else if tg != nil {
+		log.Info("ANTHROPIC_API_KEY is not set: alerts use the plain template")
+	}
+
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sched.Run(gctx) })
 	if tg != nil {
 		proc := outbox.New(outbox.Config{
 			Store:      st,
-			Summarizer: summarizer.Template{},
+			Summarizer: sum,
 			Notifier:   tg,
 			Categories: sources.Categories(),
 			Logger:     log,

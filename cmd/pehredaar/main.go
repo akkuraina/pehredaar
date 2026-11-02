@@ -5,6 +5,7 @@
 //
 //	pehredaar run [flags]           watch sources and serve the local dashboard
 //	pehredaar probe [flags] <url>   fetch + normalize a URL and show the result
+//	pehredaar summarize [id]        show the alert a stored change would produce
 package main
 
 import (
@@ -36,6 +37,8 @@ func run() int {
 		err = runServe(ctx, args)
 	case "probe":
 		err = runProbe(ctx, args)
+	case "summarize":
+		err = runSummarize(ctx, args)
 	case "help", "-h", "-help", "--help":
 		usage()
 		return 0
@@ -57,6 +60,7 @@ func usage() {
 Usage:
   pehredaar run [flags]           watch sources; dashboard at http://127.0.0.1:8787
   pehredaar probe [flags] <url>   fetch and normalize a URL, show what Pehredaar sees
+  pehredaar summarize [id]        show the alert a stored change would produce (sends nothing)
 
 Run "pehredaar <command> -h" for a command's flags.
 `)
