@@ -112,6 +112,37 @@ func TestSSCFeedAttachmentURL(t *testing.T) {
 	if !slices.Contains(urls, want) {
 		t.Errorf("attachment URLs %v do not include %s", urls, want)
 	}
+
+	// AttachmentLink must recover the same URL from the canonical text,
+	// which is all later stages (alerts) have.
+	var fromText []string
+	for line := range strings.SplitSeq(doc.Text, "\n") {
+		for _, f := range strings.Split(line, " | ") {
+			if link, ok := AttachmentLink(feedSource.URL, f); ok {
+				fromText = append(fromText, link)
+			}
+		}
+	}
+	if !slices.Equal(fromText, urls) {
+		t.Errorf("AttachmentLink from text = %v, want %v", fromText, urls)
+	}
+}
+
+func TestAttachmentLink(t *testing.T) {
+	const feed = "https://ssc.gov.in/api/general-website/portal/notice-boards?page=1"
+	for _, tc := range []struct {
+		field, want string
+		ok          bool
+	}{
+		{"att: uploads/a b (final).pdf (1234 B)", "https://ssc.gov.in/api/attachment/uploads/a%20b%20%28final%29.pdf", true},
+		{"start: 2026-11-01", "", false},
+		{"att: no size.pdf", "", false},
+	} {
+		got, ok := AttachmentLink(feed, tc.field)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("AttachmentLink(%q) = %q, %v; want %q, %v", tc.field, got, ok, tc.want, tc.ok)
+		}
+	}
 }
 
 // mutateFeed decodes the English fixture into generic JSON, applies fn, and

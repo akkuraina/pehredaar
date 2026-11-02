@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -134,6 +135,25 @@ func (it FeedItem) canonicalLine() string {
 		parts = append(parts, fmt.Sprintf("att: %s (%d B)", a.Path, a.Size))
 	}
 	return strings.Join(parts, " | ")
+}
+
+// attFieldRE matches the attachment field written by canonicalLine. The
+// path may itself contain spaces and parentheses, so only the trailing
+// "(N B)" is treated as the size.
+var attFieldRE = regexp.MustCompile(`^att: (.+) \(\d+ B\)$`)
+
+// AttachmentLink turns an "att: path (N B)" field of a canonical feed line
+// into the attachment's download URL. ok is false for any other field.
+func AttachmentLink(feedURL, field string) (link string, ok bool) {
+	m := attFieldRE.FindStringSubmatch(field)
+	if m == nil {
+		return "", false
+	}
+	base, err := url.Parse(feedURL)
+	if err != nil || base.Host == "" {
+		return "", false
+	}
+	return sscAttachmentURL(base, m[1]), true
 }
 
 // sscAttachmentURL builds the download URL for an attachment path. The
