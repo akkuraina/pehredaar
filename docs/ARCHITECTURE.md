@@ -410,26 +410,42 @@ whole blocks plus "... N more not shown"; the stored diff is the capped text.
 
 ## 10. Summarization and importance
 
-- Input: source label, category, diff hunks (old vs new), and for new feed items
-  the headline plus the first ~3 KB of the PDF's text.
-- Output: strict JSON `{"summary": "...", "importance": "date|eligibility|fee|other|cosmetic"}`.
-  Parsed and validated. Invalid output → retry once → fall back.
-- Prompt rules: state only what the diff shows, quote old → new values, never
-  speculate. Output language is a parameter (`en` / `hi`). The model writes the
-  summary directly in that language. Summaries are cached per
-  `(change, language)`, so each language is summarized at most once.
-- **Hindi sources:** the LLM gets the clean JSON headline plus the
-  *numbers/dates* extracted from the diff, never the garbled PDF prose. If
-  the diff has no usable numbers, the summary is just "New/updated notice:
-  <headline>" with the PDF link. Importance is then `other` unless the
-  headline says otherwise. A paired English notice, when one exists, is the
-  better source, and that's how English-first alerts reach Hindi users anyway.
+Implemented in `summarizer.Claude` (decided 2026-11-02): Anthropic's
+**Claude Haiku 5.5** (`claude-haiku-5-5`, the cheapest current model; override
+with `PEHREDAAR_LLM_MODEL`), effort `low`, via the official Go SDK. Used when
+`ANTHROPIC_API_KEY` is set; otherwise alerts use the template (§11). The
+`Summarizer` interface keeps the provider swappable.
+
+- **Input:** source label, source type, output language, and the change.
+  Feed changes are sent as the *English template rendering*, not the raw
+  diff: the raw diff holds UTC timestamps (`2026-11-11T18:30:00Z` is 12 Nov in
+  India) and the template has already turned them into IST dates. Document
+  changes are sent as the diff text. The change is wrapped in `<change>` tags
+  and the prompt says it is data, never instructions.
+- **Output:** JSON `{"summary", "importance"}`, enforced by a JSON schema
+  (structured outputs) and validated again: known importance, summary 1–400
+  runes. Invalid output, an API error, a refusal or a cut-off answer is an
+  error; the outbox retries and, after 3 attempts, falls back to the template.
+- **Alert text:** the model's summary, a blank line, then the template's exact
+  lines, so a reader can check the summary against the real old → new values.
+- **Number check:** every digit run in the summary (Devanagari digits
+  normalized, leading zeros ignored) must appear in the input. If not, the
+  summary is dropped and the alert is the plain template with importance
+  `other`: an invented date never reaches a user. This is code, not a prompt.
+- **Cosmetic:** only edits of existing items (feed `~` blocks, document
+  diffs) may be `cosmetic`. A new or removed notice classed cosmetic is turned
+  into `other`, so one wrong label can never hide a new notice.
+- **Language:** the model writes the summary directly in the subscriber's
+  language. Summaries are cached per `(change, language)`.
+- **Hindi PDFs** skip the model entirely: their text is garbled, and the
+  template already says "open the PDF". Importance is `other`.
 - **Alert policy:** `cosmetic` → `suppressed`. Everything else alerts. `other`
   covers things like exam city notices, which aspirants still want.
-- **LLM down:** after N failed attempts, send a templated fallback ("SSC Notice
-  Board: new notice — <headline>") rather than stay silent. Users must not miss
-  a date change because a provider had an outage.
-- Provider is chosen by env var (`LLM_PROVIDER`). Tests use a fake summarizer.
+- **Not yet:** a new feed item's attached PDF is not read, so its summary is
+  based on the headline and fields only. Reading the PDF is the next
+  improvement.
+- **Tuning:** `pehredaar summarize [id]` prints a stored change's alert
+  without saving or sending it. Tests use a fake API server; none call Anthropic.
 
 ---
 
@@ -462,7 +478,8 @@ SI Delhi Police CBE now 23–28 Nov.
 📄 <link to PDF>
 ```
 
-Until the LLM summarizer exists, the text is a template built from the diff:
+With an Anthropic key, the alert opens with Claude's summary (§10); the
+template text below it is always included. The template is built from the diff:
 "New notice / Notice updated / Notice removed: <headline>" with changed fields
 paired (`Start date: 1 May 2026 → 1 Jul 2026`, timestamps shown in IST), or
 for PDFs "Document updated: <label>" with up to 3 Was/Now lines. Hindi PDFs
@@ -539,7 +556,8 @@ All secrets are env vars, loaded once in `config`, never logged, and never commi
 | `PEHREDAAR_DB` | SQLite path | `./data/pehredaar.db` |
 | `PEHREDAAR_SOURCES` | Sources file | `./sources.yaml` |
 | `TELEGRAM_BOT_TOKEN` | Bot token. Unset: `run` warns and runs without the bot and outbox (changes are still detected, and stay pending) | unset |
-| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | Summarizer (milestone 5) | not used yet: template summaries |
+| `ANTHROPIC_API_KEY` | Claude summaries (§10). Unset: template alerts | unset |
+| `PEHREDAAR_LLM_MODEL` | Claude model for summaries | `claude-haiku-5-5` |
 | `PDFTOTEXT_PATH` | Override binary | `pdftotext` on PATH |
 | `PEHREDAAR_WORKERS` | Pool size | `4` |
 | `PEHREDAAR_HTTP` | Dashboard address (loopback only) | `127.0.0.1:8787` |
@@ -567,6 +585,9 @@ workers write concurrently. Driver: `modernc.org/sqlite` (pure Go, no cgo).
   blocked users; summarizer fallback; cosmetic suppression.
 - **notifier:** command logic against a real store, `Send` against a fake
   Bot API. No test talks to Telegram.
+- **summarizer:** template against diff fixtures; Claude against a fake
+  Messages API (`httptest`): request shape, number check, cosmetic rule,
+  Hindi PDF skip, every error path. No test talks to Anthropic.
 - PDF tests need `pdftotext` and are skipped (`t.Skip`) if it's missing.
 
 ---
@@ -579,7 +600,7 @@ the six feeds in §6; English **and** Hindi.
 1. **In-place PDF edits vs new notices**: measure with the probe before
    tuning PDF poll frequency.
 2. **Hindi PDF text**: does poppler extract it better than xpdf? Is OCR worth it in v1.1?
-3. **LLM provider and model**: to decide at step 5.
+3. ~~LLM provider and model~~: decided 2026-11-02, Claude Haiku 5.5 (§10).
 4. **Hosting**: laptop for development. A small Linux VPS later (Go cross-compiles from Windows).
 
 ---

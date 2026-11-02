@@ -58,7 +58,7 @@ internal/
   fetcher/      # HTTP + PDF fetching, robots.txt, rate limiting
   normalize/    # strip noise, extract text
   differ/       # compare snapshots
-  summarizer/   # change → alert text (template now, LLM later)
+  summarizer/   # change → alert text (Claude, with the template as fallback)
   notifier/     # Telegram bot: commands + sending
   outbox/       # pending changes → summaries → alerts
   store/        # DB access (interface + SQLite impl)
@@ -75,7 +75,12 @@ go build -o bin/pehredaar.exe ./cmd/pehredaar
 $env:TELEGRAM_BOT_TOKEN = "..."  # or put it in .env (gitignored); optional, without it no bot and no alerts
 bin/pehredaar.exe run            # scheduler + bot + dashboard at http://127.0.0.1:8787
 bin/pehredaar.exe probe <url>    # inspect one URL without touching the DB
+bin/pehredaar.exe summarize [id] # show a stored change's alert; sends nothing
 ```
+
+`.env` (gitignored) holds `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY`.
+Without the Anthropic key, alerts use the plain template. Summaries use
+Claude Haiku 5.5 (`claude-haiku-5-5`); override with `PEHREDAAR_LLM_MODEL`.
 
 State lives in `data/pehredaar.db` (gitignored). Delete it to start fresh.
 Port 8080 is taken by a local Apache on the dev machine, hence 8787.
