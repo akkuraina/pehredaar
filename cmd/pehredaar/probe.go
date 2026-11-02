@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akkuraina/pehredaar/internal/differ"
 	"github.com/akkuraina/pehredaar/internal/fetcher"
 	"github.com/akkuraina/pehredaar/internal/normalize"
 	"github.com/akkuraina/pehredaar/internal/store"
 )
 
-// probe is a development tool for step 2: it shows exactly what the
+// probe is a development tool: it shows exactly what the
 // pipeline would see for a URL, so we can judge how noisy a source is
 // before trusting it.
 type probe struct {
@@ -30,6 +31,7 @@ func runProbe(ctx context.Context, args []string) error {
 	attachments := fs.Int("attachments", 0, "for feeds: also probe the first N attachment PDFs")
 	lines := fs.Int("lines", 15, "lines of canonical text to show (0 = all)")
 	gap := fs.Duration("gap", 3*time.Second, "minimum delay between requests to one host")
+	windowed := fs.Bool("windowed", true, "for feeds: the URL returns one page of a longer list (false for the calendar)")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pehredaar probe [flags] <url>")
 		fs.PrintDefaults()
@@ -72,7 +74,7 @@ func runProbe(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		compare(first, second)
+		return compare(first, second, differ.Options{Windowed: *windowed})
 	}
 	return nil
 }
@@ -134,8 +136,9 @@ func (p *probe) probeAttachments(ctx context.Context, feed normalize.Doc, limit 
 	}
 }
 
-// compare reports whether the second fetch would count as a change.
-func compare(a, b probeResult) {
+// compare reports whether the second fetch would count as a change, using
+// the same differ the scheduler uses.
+func compare(a, b probeResult, opts differ.Options) error {
 	fmt.Println("\n=== comparison")
 	switch {
 	case b.resp.NotModified:
@@ -146,37 +149,18 @@ func compare(a, b probeResult) {
 			fmt.Println("  note: ETag changed although content did not; the ETag is noisy for this source")
 		}
 	default:
-		fmt.Println("  CHANGED: canonical text differs")
-		removed, added := lineSetDiff(a.doc.Text, b.doc.Text)
-		for _, l := range removed {
-			fmt.Println("  - " + l)
+		r, err := differ.Diff(b.kind, a.doc.Text, b.doc.Text, opts)
+		if err != nil {
+			return err
 		}
-		for _, l := range added {
-			fmt.Println("  + " + l)
+		if r.Empty() {
+			fmt.Printf("  text differs but only as noise (%d blocks ignored): no alert\n", r.Ignored)
+			return nil
 		}
+		fmt.Printf("  CHANGED (%s, %d noise blocks ignored)\n", r.Kind, r.Ignored)
+		printPreview(r.Text, 0)
 	}
-}
-
-// lineSetDiff is a deliberately crude diff (which lines exist only on one
-// side) that's good enough to eyeball noise. The real differ comes in step 3.
-func lineSetDiff(a, b string) (removed, added []string) {
-	inA := make(map[string]bool)
-	for l := range strings.SplitSeq(a, "\n") {
-		inA[l] = true
-	}
-	inB := make(map[string]bool)
-	for l := range strings.SplitSeq(b, "\n") {
-		inB[l] = true
-		if !inA[l] {
-			added = append(added, l)
-		}
-	}
-	for l := range strings.SplitSeq(a, "\n") {
-		if !inB[l] {
-			removed = append(removed, l)
-		}
-	}
-	return removed, added
+	return nil
 }
 
 func detectKind(resp *fetcher.Response) store.Kind {

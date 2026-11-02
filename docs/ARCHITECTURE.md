@@ -260,13 +260,16 @@ on startup (upsert by URL; sources removed from the file are disabled, not delet
   interval: 15m
   feed:
     discover_attachments: true   # create pdf child sources for new items
+    windowed: true               # page 1 of a longer list; items scroll (see section 9)
     keep_fields: [id, headline, createdAt, attachments.path]
 - label: SSC Calendar
   kind: feed
   category: ssc:calendar
   languages: [en, hi]
-  url: ...
+  url: ...                       # needs &year=YYYY; returns the whole year
   interval: 1h
+  feed:
+    windowed: false              # complete list: a missing item is a removal
 ```
 
 **v1 feeds (decided):** notice-boards, ssc-calendar, admit-card, answer-key,
@@ -350,11 +353,9 @@ Noise filtering is applied in layers. Each layer is cheap and testable against f
 | 5. Diff-level filter | — | Ignore diffs that are whitespace/punctuation only | ← same |
 | 6. LLM | Classifies leftovers as `cosmetic` → suppressed | ← same | ← same |
 
-Why sort feed items: the API orders by `createdAt`, but pagination boundaries
-shift when a notice is added, so item 10 falls off page 1. The differ treats
-an item that *left page 1* differently from one that was *deleted*. Rule: an
-item counts as removed only if the feed's item count didn't also gain an
-item. Otherwise it's just pagination churn. To be validated with probe data.
+Why sort feed items: the API orders by `createdAt`, and canonical order
+must not depend on response order. Pagination is handled in the differ
+(section 9), not here.
 
 Why `-layout`: it keeps table columns aligned, so date tables (like the
 corrigendum we saw) diff as whole rows rather than scrambled words.
@@ -363,12 +364,42 @@ corrigendum we saw) diff as whole rows rather than scrambled words.
 
 ## 9. Diffing
 
-- **Feeds:** item-level set diff keyed by `id`, giving
-  `Added []Item, Removed []Item, Edited []ItemEdit` (headline or attachment changed).
-- **Documents:** line-level diff with `sergi/go-diff` (`DiffLinesToChars` →
-  `DiffMain` → `DiffCharsToLines`), then grouped into hunks with 2 lines of context.
-- The diff passed to the LLM is capped (e.g. 4 KB). Bigger rewrites are
-  summarized as "notice substantially revised" plus the first hunks.
+Package `differ`. Entry point `Diff(kind, oldText, newText, Options) Result`,
+where `Result{Kind, Text, Truncated, Ignored}`; `Result.Empty()` means "save
+the snapshot, record no change". It works on canonical text only, so it can
+diff any two stored snapshots without re-parsing source bodies.
+
+**Feeds** (`differ.Feed`): items are matched by id (the first field of each
+canonical line), giving `Added`, `Removed` and `Edited` (with the fields that
+differ, compared as multisets). The differ never interprets fields; it only
+relies on the line shape `id | createdAt | field | ...`.
+
+Pagination: SSC feeds are fetched as page 1 (`limit=10`), so items scroll in
+and out. For a source marked **windowed**:
+
+- a missing item older than everything now on the page fell off the bottom:
+  scrolled, not removed;
+- a new item older than everything previously on the page came up from page
+  2: scrolled, not added (a genuinely new notice is the newest item).
+
+This replaced the count-based rule first planned, which misreads an addition
+and a deletion in the same interval. The calendar returns the whole year, so
+it is not windowed and every missing item is a removal. `Change.Kind` is
+`added` if anything was added, else `edited`, else `removed`.
+
+**Documents** (`differ.Text`): line diff with `sergi/go-diff`
+(`DiffLinesToChars` → `DiffMain` → `DiffCharsToLines`, timeout disabled so
+results don't depend on machine load), grouped into hunks with 2 lines of
+context. A hunk is dropped as cosmetic when its deleted and inserted lines
+are equal after removing whitespace and punctuation (catches pdftotext
+re-wrapping and quote style). Letters, digits, combining marks (Devanagari
+vowel signs) and punctuation *between digits* are kept, so `1.5` vs `15`
+and `12.11.2026` vs `1211.2026` still count.
+
+**Rendering and cap.** Feed blocks are `+ line`, `- line`, and
+`~ id | headline` followed by `- field` / `+ field`. Document hunks use
+`@@ -old +new @@` with `  `/`- `/`+ ` prefixes. Text is capped at 4 KB by
+whole blocks plus "... N more not shown"; the stored diff is the capped text.
 
 ---
 
