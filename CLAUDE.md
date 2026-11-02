@@ -72,7 +72,7 @@ sources.yaml    # curated sources
 
 ```
 go build -o bin/pehredaar.exe ./cmd/pehredaar
-$env:TELEGRAM_BOT_TOKEN = "..."  # optional; without it, no bot and no alerts
+$env:TELEGRAM_BOT_TOKEN = "..."  # or put it in .env (gitignored); optional, without it no bot and no alerts
 bin/pehredaar.exe run            # scheduler + bot + dashboard at http://127.0.0.1:8787
 bin/pehredaar.exe probe <url>    # inspect one URL without touching the DB
 ```

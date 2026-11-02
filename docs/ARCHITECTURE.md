@@ -532,7 +532,7 @@ Operator visibility: structured logs via `log/slog`. Later, an optional
 
 ## 14. Configuration and secrets
 
-All secrets are env vars, loaded once in `config`, never logged, and never committed (`.env` is gitignored).
+All secrets are env vars, loaded once in `config`, never logged, and never committed (`.env` is gitignored). `pehredaar run` also reads a `.env` file in the working directory (`KEY=VALUE` lines, `#` comments, optional quotes); a variable already set in the real environment wins over the file. Only the names of loaded variables are logged.
 
 | Var | Purpose | Default |
 |---|---|---|

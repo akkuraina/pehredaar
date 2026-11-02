@@ -29,6 +29,12 @@ import (
 // runServe is `pehredaar run`: sync sources.yaml, then run the scheduler
 // and the local dashboard until Ctrl+C.
 func runServe(ctx context.Context, args []string) error {
+	// First, because the flag defaults below read the environment.
+	fromDotEnv, err := config.LoadDotEnv(".env")
+	if err != nil {
+		return err
+	}
+
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	// Each flag defaults to its environment variable, so the same binary
 	// works from a terminal (flags) and from a service manager (env).
@@ -48,6 +54,9 @@ func runServe(ctx context.Context, args []string) error {
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if len(fromDotEnv) > 0 {
+		log.Info("loaded .env", "vars", fromDotEnv) // names only, never values
+	}
 
 	sources, err := config.LoadSources(*sourcesPath, time.Now())
 	if err != nil {
