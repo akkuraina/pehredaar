@@ -9,24 +9,63 @@ import (
 	"github.com/akkuraina/pehredaar/internal/store"
 )
 
-func (s *Store) LatestSnapshot(ctx context.Context, sourceID int64) (store.Snapshot, error) {
+func scanSnapshot(sc scanner) (store.Snapshot, error) {
 	var (
 		snap      store.Snapshot
 		fetchedAt sql.NullInt64
 	)
-	err := s.db.QueryRowContext(ctx, `
+	if err := sc.Scan(&snap.ID, &snap.SourceID, &snap.ContentHash, &snap.Text, &fetchedAt); err != nil {
+		return store.Snapshot{}, err
+	}
+	snap.FetchedAt = fromMillis(fetchedAt)
+	return snap, nil
+}
+
+func (s *Store) LatestSnapshot(ctx context.Context, sourceID int64) (store.Snapshot, error) {
+	snap, err := scanSnapshot(s.db.QueryRowContext(ctx, `
 		SELECT id, source_id, content_hash, text, fetched_at
 		FROM snapshots WHERE source_id = ?
-		ORDER BY id DESC LIMIT 1`, sourceID,
-	).Scan(&snap.ID, &snap.SourceID, &snap.ContentHash, &snap.Text, &fetchedAt)
+		ORDER BY id DESC LIMIT 1`, sourceID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Snapshot{}, fmt.Errorf("latest snapshot of source %d: %w", sourceID, store.ErrNotFound)
 	}
 	if err != nil {
 		return store.Snapshot{}, fmt.Errorf("sqlite: latest snapshot of source %d: %w", sourceID, err)
 	}
-	snap.FetchedAt = fromMillis(fetchedAt)
 	return snap, nil
+}
+
+func (s *Store) Snapshot(ctx context.Context, id int64) (store.Snapshot, error) {
+	snap, err := scanSnapshot(s.db.QueryRowContext(ctx, `
+		SELECT id, source_id, content_hash, text, fetched_at
+		FROM snapshots WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Snapshot{}, fmt.Errorf("snapshot %d: %w", id, store.ErrNotFound)
+	}
+	return snap, err
+}
+
+func (s *Store) Snapshots(ctx context.Context, sourceID int64, limit int) ([]store.Snapshot, error) {
+	// Selecting '' for text keeps scanSnapshot reusable without reading
+	// large documents we won't show.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, source_id, content_hash, '', fetched_at
+		FROM snapshots WHERE source_id = ?
+		ORDER BY id DESC LIMIT ?`, sourceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: snapshots of source %d: %w", sourceID, err)
+	}
+	defer rows.Close()
+
+	var out []store.Snapshot
+	for rows.Next() {
+		snap, err := scanSnapshot(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, snap)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) SaveSnapshot(ctx context.Context, snap store.Snapshot, change *store.Change) (store.Snapshot, *store.Change, error) {
@@ -78,35 +117,70 @@ func (s *Store) SaveSnapshot(ctx context.Context, snap store.Snapshot, change *s
 	return snap, saved, nil
 }
 
-func (s *Store) UnfinishedChanges(ctx context.Context, limit int) ([]store.Change, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, source_id, old_snapshot_id, new_snapshot_id, kind, diff,
-		       importance, status, attempts, created_at
-		FROM changes
-		WHERE status IN ('pending', 'summarized')
-		ORDER BY id
-		LIMIT ?`, limit)
+const changeColumns = `id, source_id, old_snapshot_id, new_snapshot_id, kind, diff,
+	importance, status, attempts, created_at`
+
+func scanChange(sc scanner) (store.Change, error) {
+	var (
+		c         store.Change
+		oldSnap   sql.NullInt64
+		createdAt sql.NullInt64
+	)
+	if err := sc.Scan(&c.ID, &c.SourceID, &oldSnap, &c.NewSnapshotID, &c.Kind, &c.Diff,
+		&c.Importance, &c.Status, &c.Attempts, &createdAt); err != nil {
+		return store.Change{}, err
+	}
+	c.OldSnapshotID = oldSnap.Int64
+	c.CreatedAt = fromMillis(createdAt)
+	return c, nil
+}
+
+// queryChanges runs a SELECT of changeColumns and scans every row.
+func (s *Store) queryChanges(ctx context.Context, query string, args ...any) ([]store.Change, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+changeColumns+` FROM changes `+query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: unfinished changes: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
 	var out []store.Change
 	for rows.Next() {
-		var (
-			c         store.Change
-			oldSnap   sql.NullInt64
-			createdAt sql.NullInt64
-		)
-		if err := rows.Scan(&c.ID, &c.SourceID, &oldSnap, &c.NewSnapshotID, &c.Kind, &c.Diff,
-			&c.Importance, &c.Status, &c.Attempts, &createdAt); err != nil {
+		c, err := scanChange(rows)
+		if err != nil {
 			return nil, err
 		}
-		c.OldSnapshotID = oldSnap.Int64
-		c.CreatedAt = fromMillis(createdAt)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) UnfinishedChanges(ctx context.Context, limit int) ([]store.Change, error) {
+	out, err := s.queryChanges(ctx,
+		`WHERE status IN ('pending', 'summarized') ORDER BY id LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: unfinished changes: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) Change(ctx context.Context, id int64) (store.Change, error) {
+	c, err := scanChange(s.db.QueryRowContext(ctx,
+		`SELECT `+changeColumns+` FROM changes WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Change{}, fmt.Errorf("change %d: %w", id, store.ErrNotFound)
+	}
+	return c, err
+}
+
+func (s *Store) RecentChanges(ctx context.Context, sourceID int64, limit int) ([]store.Change, error) {
+	// "? = 0 OR source_id = ?" keeps one query for both cases; SQLite still
+	// uses the index when a source is given.
+	out, err := s.queryChanges(ctx,
+		`WHERE ? = 0 OR source_id = ? ORDER BY id DESC LIMIT ?`, sourceID, sourceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: recent changes: %w", err)
+	}
+	return out, nil
 }
 
 func (s *Store) UpdateChange(ctx context.Context, c store.Change) error {

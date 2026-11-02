@@ -36,6 +36,7 @@ func Run(t *testing.T, open Opener) {
 		{"Categories", testCategories},
 		{"Snapshots", testSnapshots},
 		{"SaveSnapshotIsAtomic", testSaveSnapshotAtomic},
+		{"ReadQueries", testReadQueries},
 		{"ChangeLifecycle", testChangeLifecycle},
 		{"Summaries", testSummaries},
 		{"Subscribers", testSubscribers},
@@ -323,6 +324,78 @@ func testSnapshots(t *testing.T, s store.Store) {
 	}
 	if latest.ID != second.ID || latest.Text != "two" || latest.ContentHash != "h2" {
 		t.Errorf("latest = %+v, want snapshot %d", latest, second.ID)
+	}
+}
+
+// testReadQueries covers the listing methods the dashboard uses.
+func testReadQueries(t *testing.T, s store.Store) {
+	a := mustSource(t, s, "https://example.test/read-a", "c")
+	b := mustSource(t, s, "https://example.test/read-b", "c")
+	if _, err := s.UpsertSource(ctx(t), store.Source{
+		URL: "https://example.test/read-off", Kind: store.KindPDF, Category: "c",
+		Language: store.LangHindi, CheckInterval: time.Hour, Enabled: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.Sources(ctx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 || all[0].ID != a.ID || all[1].ID != b.ID || all[2].Enabled {
+		t.Errorf("Sources = %+v, want a, b, then the disabled one", all)
+	}
+
+	base, _, err := s.SaveSnapshot(ctx(t), store.Snapshot{SourceID: a.ID, ContentHash: "h1", Text: "one"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, chA, err := s.SaveSnapshot(ctx(t), store.Snapshot{SourceID: a.ID, ContentHash: "h2", Text: "two"},
+		&store.Change{OldSnapshotID: base.ID, Kind: store.ChangeEdited, Diff: "- one + two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chB := mustChange(t, s, b)
+
+	snap, err := s.Snapshot(ctx(t), next.ID)
+	if err != nil || snap.Text != "two" || snap.SourceID != a.ID {
+		t.Errorf("Snapshot = %+v, %v", snap, err)
+	}
+	if _, err := s.Snapshot(ctx(t), 99999); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("Snapshot(missing): err = %v, want ErrNotFound", err)
+	}
+	snaps, err := s.Snapshots(ctx(t), a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 2 || snaps[0].ID != next.ID || snaps[0].Text != "" || snaps[0].ContentHash != "h2" {
+		t.Errorf("Snapshots = %+v, want newest first without text", snaps)
+	}
+
+	got, err := s.Change(ctx(t), chA.ID)
+	if err != nil || got.Diff != chA.Diff || got.OldSnapshotID != base.ID {
+		t.Errorf("Change = %+v, %v", got, err)
+	}
+	if _, err := s.Change(ctx(t), 99999); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("Change(missing): err = %v, want ErrNotFound", err)
+	}
+
+	recent, err := s.RecentChanges(ctx(t), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 2 || recent[0].ID != chB.ID || recent[1].ID != chA.ID {
+		t.Errorf("RecentChanges(all) = %+v, want b's then a's", recent)
+	}
+	onlyA, err := s.RecentChanges(ctx(t), a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onlyA) != 1 || onlyA[0].ID != chA.ID {
+		t.Errorf("RecentChanges(a) = %+v", onlyA)
+	}
+	if one, _ := s.RecentChanges(ctx(t), 0, 1); len(one) != 1 {
+		t.Errorf("limit not applied: %d changes", len(one))
 	}
 }
 

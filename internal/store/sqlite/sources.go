@@ -91,6 +91,24 @@ func (s *Store) Source(ctx context.Context, id int64) (store.Source, error) {
 	return src, err
 }
 
+func (s *Store) Sources(ctx context.Context) ([]store.Source, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+sourceColumns+` FROM sources ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: sources: %w", err)
+	}
+	defer rows.Close()
+
+	var out []store.Source
+	for rows.Next() {
+		src, err := scanSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, src)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) DueSources(ctx context.Context, now time.Time, limit int) ([]store.Source, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+sourceColumns+` FROM sources

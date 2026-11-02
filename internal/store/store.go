@@ -172,6 +172,9 @@ type Store interface {
 	// existing source with the same URL. Polling state is never overwritten.
 	UpsertSource(ctx context.Context, s Source) (Source, error)
 	Source(ctx context.Context, id int64) (Source, error)
+	// Sources lists every source, enabled or not, ordered by id (so curated
+	// sources come before the PDFs discovered from them).
+	Sources(ctx context.Context) ([]Source, error)
 	// DueSources returns enabled sources whose next check is at or before now,
 	// most overdue first.
 	DueSources(ctx context.Context, now time.Time, limit int) ([]Source, error)
@@ -187,6 +190,10 @@ type Store interface {
 
 	// LatestSnapshot returns ErrNotFound if the source has no snapshots yet.
 	LatestSnapshot(ctx context.Context, sourceID int64) (Snapshot, error)
+	Snapshot(ctx context.Context, id int64) (Snapshot, error)
+	// Snapshots lists a source's snapshots newest first. Text is left empty:
+	// listings don't need it and a PDF's text can be large.
+	Snapshots(ctx context.Context, sourceID int64, limit int) ([]Snapshot, error)
 	// SaveSnapshot stores snap and, if change is non-nil, a change pointing
 	// at it, in a single transaction: either both are saved or neither is.
 	// The returned change (nil if none was given) has its ID and
@@ -194,6 +201,9 @@ type Store interface {
 	SaveSnapshot(ctx context.Context, snap Snapshot, change *Change) (Snapshot, *Change, error)
 	// UnfinishedChanges returns changes still pending or summarized, oldest first.
 	UnfinishedChanges(ctx context.Context, limit int) ([]Change, error)
+	Change(ctx context.Context, id int64) (Change, error)
+	// RecentChanges returns changes newest first; sourceID 0 means all sources.
+	RecentChanges(ctx context.Context, sourceID int64, limit int) ([]Change, error)
 	// UpdateChange saves a change's importance, status and attempts.
 	UpdateChange(ctx context.Context, c Change) error
 	SaveSummary(ctx context.Context, changeID int64, lang Language, text string) error
