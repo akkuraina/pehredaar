@@ -27,7 +27,7 @@ sources:
   - label: SSC Calendar
     kind: feed
     category: ssc:calendar
-    languages: [en, hi]
+    languages: [en] # Hindi feed is empty (totalRecords 0, checked 2026-11-02)
     url: https://ssc.gov.in/api/general-website/portal/ssc-calendar?page=1&limit=10&contentType=ssc-calendar&key=startDate&order=ASC&isAttachment=true&isPaginationRequired=false&language={lang}&year={year}&attributes=id,headline,examId,examYear,desc,content,contentType,startDate,endDate,language,createdAt
     interval: 1h
     windowed: false # returns the whole year: a missing item is a removal
@@ -36,7 +36,7 @@ sources:
   - label: SSC Admit Cards
     kind: feed
     category: ssc:admit-card
-    languages: [en, hi]
+    languages: [en] # Hindi feed is empty (totalRecords 0, checked 2026-11-02)
     url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=admit-card&key=createdAt&order=DESC&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
     interval: 1h # the English feed was stale (2 items from 2024) when checked
     windowed: true
@@ -63,7 +63,7 @@ sources:
   - label: SSC Tentative Vacancies
     kind: feed
     category: ssc:tentative-vacancy
-    languages: [en, hi]
+    languages: [en] # Hindi feed is empty (totalRecords 0, checked 2026-11-02)
     url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=tentative-vacancy&key=createdAt&order=DESC&pageType=filter&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
     interval: 1h
     windowed: true

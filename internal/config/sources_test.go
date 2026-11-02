@@ -19,8 +19,9 @@ func TestRepoSourcesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.List) != 12 {
-		t.Errorf("got %d sources, want 12 (6 feeds x 2 languages)", len(s.List))
+	// 6 feeds in English; only 3 of them exist in Hindi.
+	if len(s.List) != 9 {
+		t.Errorf("got %d sources, want 9", len(s.List))
 	}
 	langs := map[store.Language]int{}
 	for _, src := range s.List {
@@ -36,7 +37,7 @@ func TestRepoSourcesFile(t *testing.T) {
 			t.Errorf("%s should be windowed", src.Label)
 		}
 	}
-	if langs[store.LangEnglish] != 6 || langs[store.LangHindi] != 6 {
+	if langs[store.LangEnglish] != 6 || langs[store.LangHindi] != 3 {
 		t.Errorf("languages = %v", langs)
 	}
 }
