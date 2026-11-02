@@ -3,6 +3,7 @@ module github.com/akkuraina/pehredaar
 go 1.27.0
 
 require (
+	github.com/sergi/go-diff v1.4.0
 	github.com/temoto/robotstxt v1.1.2
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.16.0

@@ -1,0 +1,5 @@
++ zzfresh000000000000000 | 2026-11-01T10:00:00.000Z | Notice of a brand new examination | att: uploads/masterData/NoticeBoards/new.pdf (1000 B)
+~ 5jfpb0tey9le4bsgd207x | Important Notice - Revised dates for Junior Engineer Examination, 2026 and Sub-Inspector in Delhi Police and Central Armed Police Forces Examination, 2026.
+    - att: uploads/masterData/NoticeBoards/Important notice_revised_dated_26_10_2026.pdf (376378 B)
+    + att: uploads/masterData/NoticeBoards/Important notice_revised_dated_26_10_2026.pdf (380001 B)
+- hv72inihlv3c3rp1ni034 | 2026-10-23T07:57:09.548Z | Constable (GD) in Central Armed Police Forces (CAPFs) and SSF, and Rifleman (GD) in Assam Rifles Examination, 2026– Information regarding status of categories of shortlisted candidates | att: uploads/masterData/NoticeBoards/writeup_23102026.pdf (242280 B)
