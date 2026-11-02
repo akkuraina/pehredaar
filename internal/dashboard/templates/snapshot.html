@@ -1,0 +1,11 @@
+{{define "content"}}
+<p><a href="/">← Overview</a> · <a href="/sources/{{.Source.ID}}">{{.Source.Label}}</a></p>
+<h1>Snapshot #{{.Snap.ID}}</h1>
+<div class="panel"><dl class="meta">
+  <dt>Fetched</dt><dd>{{ago .Snap.FetchedAt}} <span class="muted">{{stamp .Snap.FetchedAt}}</span></dd>
+  <dt>Hash</dt><dd><code>{{.Snap.ContentHash}}</code></dd>
+  <dt>Size</dt><dd>{{.Lines}} lines</dd>
+</dl></div>
+<h2>Canonical text</h2>
+<div class="panel"><pre>{{.Snap.Text}}</pre></div>
+{{end}}

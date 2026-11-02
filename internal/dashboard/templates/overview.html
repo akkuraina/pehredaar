@@ -1,0 +1,30 @@
+{{define "content"}}
+<div class="stats">
+  <div class="stat"><b>{{len .Feeds}}</b><span>curated feeds</span></div>
+  <div class="stat"><b>{{len .PDFs}}</b><span>discovered PDFs</span></div>
+  <div class="stat"><b class="{{if .Failing}}err{{end}}">{{.Failing}}</b><span>failing sources</span></div>
+  <div class="stat"><b>{{len .Changes}}</b><span>recent changes</span></div>
+  <div class="stat"><b>{{.Checks}}</b><span>checks since start</span></div>
+</div>
+<p class="muted">
+  Since start: {{index .Counts "not-modified"}} not modified (304) ·
+  {{index .Counts "unchanged"}} unchanged · {{index .Counts "baseline"}} baselines ·
+  {{index .Counts "noise"}} noise · {{index .Counts "changed"}} changed ·
+  {{index .Counts "failed"}} failed. This page reloads every 30 seconds.
+</p>
+
+<h2>Recent changes</h2>
+{{template "changeTable" .Changes}}
+
+<h2>Feeds</h2>
+{{template "sourceTable" .Feeds}}
+
+<h2>Activity</h2>
+{{template "eventTable" .Events}}
+
+<h2>Discovered PDFs</h2>
+<details>
+  <summary>{{len .PDFs}} PDFs found in feed attachments, re-checked every few hours</summary>
+  {{template "sourceTable" .PDFs}}
+</details>
+{{end}}

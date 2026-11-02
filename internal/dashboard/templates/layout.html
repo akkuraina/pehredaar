@@ -1,0 +1,137 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{with .Refresh}}<meta http-equiv="refresh" content="{{.}}">{{end}}
+<title>{{.Title}} · Pehredaar</title>
+<style>
+:root {
+  --bg: #f7f6f2; --panel: #ffffff; --text: #1f2328; --muted: #6b7078; --line: #e3e1da;
+  --accent: #b4540a; --ok: #1f7a3a; --bad: #b3261e; --warn: #9a6700; --info: #1d5fa8;
+  --add-bg: #e6f4ea; --del-bg: #fce8e6; --hunk-bg: #eef2f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --panel: #1d2024; --text: #e6e6e3; --muted: #9aa0a6; --line: #2e3238;
+    --accent: #f0a050; --ok: #5cc27a; --bad: #f2867c; --warn: #e3b341; --info: #79b0f0;
+    --add-bg: #17331f; --del-bg: #3a1d1b; --hunk-bg: #1f2a3a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", "Noto Sans Devanagari", sans-serif; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+header .wrap { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header a.brand { font-weight: 700; font-size: 18px; color: var(--accent); text-decoration: none; }
+header .tag { color: var(--muted); font-style: italic; }
+main.wrap, header .wrap { max-width: 1200px; margin: 0 auto; }
+main { padding: 16px; }
+h1 { font-size: 20px; margin: 4px 0 12px; overflow-wrap: anywhere; }
+h2 { font-size: 15px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+a { color: var(--info); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.muted { color: var(--muted); }
+.nowrap { white-space: nowrap; }
+.err { color: var(--bad); overflow-wrap: anywhere; }
+.pill { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  border: 1px solid currentColor; white-space: nowrap; }
+.s-ok, .o-unchanged, .o-not-modified { color: var(--ok); }
+.s-failing, .o-failed { color: var(--bad); }
+.s-running, .o-baseline { color: var(--info); }
+.s-new, .s-disabled, .o-cancelled, .o-noise { color: var(--muted); }
+.o-changed, .k-added, .k-edited, .k-removed { color: var(--accent); }
+.stats { display: flex; gap: 12px; flex-wrap: wrap; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 120px; }
+.stat b { display: block; font-size: 22px; }
+.stat span { color: var(--muted); font-size: 12px; }
+pre { margin: 0; padding: 10px 12px; font: 12.5px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+pre .add { background: var(--add-bg); display: block; }
+pre .del { background: var(--del-bg); display: block; }
+pre .hunk { background: var(--hunk-bg); color: var(--info); display: block; }
+pre .edit { font-weight: 700; display: block; }
+pre .note { color: var(--muted); display: block; }
+pre .ctx { display: block; }
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; padding: 12px; }
+dl.meta dt { color: var(--muted); }
+dl.meta dd { margin: 0; overflow-wrap: anywhere; }
+.flash { background: var(--hunk-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+details > summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+.empty { padding: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/">Pehredaar</a>
+  <span class="tag">They changed it quietly. Pehredaar caught it.</span>
+  <span class="muted">· local operator dashboard</span>
+</div></header>
+<main class="wrap">
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}
+
+{{define "sourceTable"}}
+<div class="panel"><table>
+<tr><th>Source</th><th>Lang</th><th>Status</th><th>Last check</th><th>Next</th><th>Last error</th></tr>
+{{range .}}
+<tr>
+  <td><a href="/sources/{{.ID}}">{{short 90 .Label}}</a>{{if .Parent}}<div class="muted">from {{.Parent}}</div>{{end}}</td>
+  <td>{{.Language}}</td>
+  <td><span class="pill s-{{.Status}}">{{.Status}}{{if .ConsecutiveFailures}} ×{{.ConsecutiveFailures}}{{end}}</span></td>
+  <td class="nowrap" title="{{stamp .LastCheckedAt}}">{{ago .LastCheckedAt}}</td>
+  <td class="nowrap" title="{{stamp .NextCheckAt}}">{{if .Enabled}}{{until .NextCheckAt}}{{else}}-{{end}}</td>
+  <td class="err">{{short 120 .LastError}}</td>
+</tr>
+{{end}}
+</table></div>
+{{end}}
+
+{{define "changeTable"}}
+{{if .}}
+<div class="panel"><table>
+<tr><th>#</th><th>When</th><th>Source</th><th>Kind</th><th>Status</th><th>What</th></tr>
+{{range .}}
+<tr>
+  <td><a href="/changes/{{.ID}}">{{.ID}}</a></td>
+  <td class="nowrap" title="{{stamp .CreatedAt}}">{{ago .CreatedAt}}</td>
+  <td>{{short 60 .Source}}</td>
+  <td><span class="pill k-{{.Kind}}">{{.Kind}}</span></td>
+  <td>{{.Status}}{{with .Importance}} · {{.}}{{end}}</td>
+  <td><a href="/changes/{{.ID}}">{{short 140 .Headline}}</a></td>
+</tr>
+{{end}}
+</table></div>
+{{else}}
+<div class="panel empty">No changes yet. The first check of each source is a baseline and never counts as a change.</div>
+{{end}}
+{{end}}
+
+{{define "eventTable"}}
+{{if .}}
+<div class="panel"><table>
+<tr><th>When</th><th>Source</th><th>Outcome</th><th>Detail</th><th class="num">Took</th></tr>
+{{range .}}
+<tr>
+  <td class="nowrap" title="{{stamp .Time}}">{{ago .Time}}</td>
+  <td><a href="/sources/{{.SourceID}}">{{short 60 .Label}}</a></td>
+  <td><span class="pill o-{{.Outcome}}">{{.Outcome}}</span></td>
+  <td class="{{if eq .Outcome "failed"}}err{{end}}">{{if .ChangeID}}<a href="/changes/{{.ChangeID}}">{{short 140 .Detail}}</a>{{else}}{{short 140 .Detail}}{{end}}</td>
+  <td class="num">{{took .Duration}}</td>
+</tr>
+{{end}}
+</table></div>
+{{else}}
+<div class="panel empty">No checks yet since the program started. They begin within a few seconds.</div>
+{{end}}
+{{end}}

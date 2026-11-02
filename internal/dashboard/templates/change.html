@@ -1,0 +1,21 @@
+{{define "content"}}
+<p><a href="/">← Overview</a> · <a href="/sources/{{.Source.ID}}">{{.Source.Label}}</a></p>
+{{with .Change}}
+<h1>Change #{{.ID}} <span class="pill k-{{.Kind}}">{{.Kind}}</span></h1>
+<div class="panel"><dl class="meta">
+  <dt>Detected</dt><dd>{{ago .CreatedAt}} <span class="muted">{{stamp .CreatedAt}}</span></dd>
+  <dt>Status</dt><dd>{{.Status}}{{if .Attempts}} · {{.Attempts}} attempts{{end}}</dd>
+  <dt>Importance</dt><dd>{{with .Importance}}{{.}}{{else}}<span class="muted">not classified yet (LLM step 5)</span>{{end}}</dd>
+  <dt>Snapshots</dt><dd>
+    {{if .OldSnapshotID}}<a href="/snapshots/{{.OldSnapshotID}}">#{{.OldSnapshotID}}</a>{{else}}-{{end}}
+    → <a href="/snapshots/{{.NewSnapshotID}}">#{{.NewSnapshotID}}</a></dd>
+</dl></div>
+
+<h2>Diff</h2>
+<div class="panel"><pre>{{range diffLines .Diff}}<span class="{{.Class}}">{{.Text}}</span>{{end}}</pre></div>
+<p class="muted">
+  Feeds: <b>+</b> new notice, <b>-</b> withdrawn notice, <b>~</b> notice edited (changed fields below it).
+  Documents: <b>@@ -old +new @@</b> line numbers, then removed/added lines with two lines of context.
+</p>
+{{end}}
+{{end}}

@@ -3,9 +3,8 @@
 //
 // Usage:
 //
+//	pehredaar run [flags]           watch sources and serve the local dashboard
 //	pehredaar probe [flags] <url>   fetch + normalize a URL and show the result
-//
-// More subcommands (run, ...) arrive with later build steps.
 package main
 
 import (
@@ -33,6 +32,8 @@ func run() int {
 
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	case "run":
+		err = runServe(ctx, args)
 	case "probe":
 		err = runProbe(ctx, args)
 	case "help", "-h", "-help", "--help":
@@ -54,8 +55,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `Pehredaar: they changed it quietly. Pehredaar caught it.
 
 Usage:
+  pehredaar run [flags]           watch sources; dashboard at http://127.0.0.1:8787
   pehredaar probe [flags] <url>   fetch and normalize a URL, show what Pehredaar sees
 
-Run "pehredaar probe -h" for probe flags.
+Run "pehredaar <command> -h" for a command's flags.
 `)
 }

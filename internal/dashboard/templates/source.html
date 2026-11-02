@@ -1,0 +1,51 @@
+{{define "content"}}
+<p><a href="/">← Overview</a></p>
+{{with .Flash}}<div class="flash">{{.}}</div>{{end}}
+{{with .Source}}
+<h1>{{.Label}} <span class="pill s-{{.Status}}">{{.Status}}</span></h1>
+<div class="panel"><dl class="meta">
+  <dt>URL</dt><dd><a href="{{.URL}}" rel="noreferrer">{{.URL}}</a></dd>
+  <dt>Kind</dt><dd>{{.Kind}} · {{.Language}} · {{.Category}}</dd>
+  {{if .Parent}}<dt>Found in</dt><dd><a href="/sources/{{.ParentID}}">{{.Parent}}</a></dd>{{end}}
+  <dt>Interval</dt><dd>{{.CheckInterval}}{{if not .Enabled}} (disabled){{end}}</dd>
+  <dt>Last check</dt><dd>{{ago .LastCheckedAt}} <span class="muted">{{stamp .LastCheckedAt}}</span></dd>
+  <dt>Next check</dt><dd>{{until .NextCheckAt}} <span class="muted">{{stamp .NextCheckAt}}</span></dd>
+  <dt>Failures</dt><dd>{{.ConsecutiveFailures}} in a row{{with .LastError}} · <span class="err">{{.}}</span>{{end}}</dd>
+  <dt>ETag</dt><dd>{{with .ETag}}{{.}}{{else}}-{{end}}</dd>
+  <dt>Last-Modified</dt><dd>{{with .LastModified}}{{.}}{{else}}-{{end}}</dd>
+</dl></div>
+<form method="post" action="/sources/{{.ID}}/check" style="margin-top:12px"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Checking…'">
+  <button type="submit">Check now</button>
+  <span class="muted">Fetches immediately (conditional GET, so usually a 304), ignoring the schedule.</span>
+</form>
+{{end}}
+
+<h2>Changes</h2>
+{{template "changeTable" .Changes}}
+
+<h2>Checks since start</h2>
+{{template "eventTable" .Events}}
+
+{{if .Children}}
+<h2>Attachments watched from this feed</h2>
+{{template "sourceTable" .Children}}
+{{end}}
+
+<h2>Snapshots</h2>
+{{if .Snaps}}
+<div class="panel"><table>
+<tr><th>#</th><th>Fetched</th><th>Hash</th></tr>
+{{range .Snaps}}
+<tr><td><a href="/snapshots/{{.ID}}">{{.ID}}</a></td><td title="{{stamp .FetchedAt}}">{{ago .FetchedAt}}</td><td><code>{{hash .ContentHash}}</code></td></tr>
+{{end}}
+</table></div>
+{{else}}
+<div class="panel empty">No snapshot yet: this source hasn't been fetched successfully.</div>
+{{end}}
+
+{{if .Latest.ID}}
+<h2>Latest canonical text (what Pehredaar hashes and diffs)</h2>
+<div class="panel"><pre>{{.Latest.Text}}</pre></div>
+{{end}}
+{{end}}
