@@ -1,0 +1,70 @@
+# Curated sources Pehredaar watches. Synced into the database at startup:
+# new entries are added, edited entries updated (polling state is kept), and
+# entries removed from this file are disabled, not deleted.
+#
+# Placeholders in url:
+#   {lang}  english / hindi, one source per entry in `languages`
+#   {year}  the current year (the calendar needs it; on 1 January the URL
+#           changes, so the old year's source is disabled and a new one starts)
+#
+# The query strings are exactly what ssc.gov.in's own front end sends
+# (verified with `pehredaar probe`, 2026-11-01). Don't hand-edit them
+# without probing first.
+
+# How often PDFs discovered in feeds are re-checked.
+discovered_interval: 6h
+
+sources:
+  - label: SSC Notice Board
+    kind: feed
+    category: ssc:notice-board
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/notice-boards?page=1&limit=10&contentType=notice-boards&key=createdAt&order=DESC&isAttachment=true&language={lang}&attributes=id,headline,examId,contentType,redirectUrl,startDate,endDate,language,createdAt
+    interval: 15m
+    windowed: true
+    discover_attachments: true
+
+  - label: SSC Calendar
+    kind: feed
+    category: ssc:calendar
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/ssc-calendar?page=1&limit=10&contentType=ssc-calendar&key=startDate&order=ASC&isAttachment=true&isPaginationRequired=false&language={lang}&year={year}&attributes=id,headline,examId,examYear,desc,content,contentType,startDate,endDate,language,createdAt
+    interval: 1h
+    windowed: false # returns the whole year: a missing item is a removal
+    discover_attachments: true
+
+  - label: SSC Admit Cards
+    kind: feed
+    category: ssc:admit-card
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=admit-card&key=createdAt&order=DESC&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
+    interval: 1h # the English feed was stale (2 items from 2024) when checked
+    windowed: true
+    discover_attachments: true
+
+  - label: SSC Answer Keys
+    kind: feed
+    category: ssc:answer-key
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=answer-key&key=createdAt&order=DESC&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+
+  - label: SSC Results
+    kind: feed
+    category: ssc:results
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=results&key=createdAt&order=DESC&pageType=filter&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+
+  - label: SSC Tentative Vacancies
+    kind: feed
+    category: ssc:tentative-vacancy
+    languages: [en, hi]
+    url: https://ssc.gov.in/api/general-website/portal/records?page=1&limit=10&contentType=tentative-vacancy&key=createdAt&order=DESC&pageType=filter&isAttachment=true&language={lang}&attributes=id,headline,examId,examYear,contentType,redirectUrl,startDate,endDate,language,createdAt
+    interval: 1h
+    windowed: true
+    discover_attachments: true
