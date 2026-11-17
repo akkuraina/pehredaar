@@ -15,8 +15,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/akkuraina/pehredaar/internal/auth"
 	"github.com/akkuraina/pehredaar/internal/config"
 	"github.com/akkuraina/pehredaar/internal/dashboard"
+	"github.com/akkuraina/pehredaar/internal/email"
 	"github.com/akkuraina/pehredaar/internal/fetcher"
 	"github.com/akkuraina/pehredaar/internal/normalize"
 	"github.com/akkuraina/pehredaar/internal/notifier"
@@ -25,10 +27,12 @@ import (
 	"github.com/akkuraina/pehredaar/internal/store"
 	"github.com/akkuraina/pehredaar/internal/store/sqlite"
 	"github.com/akkuraina/pehredaar/internal/summarizer"
+	"github.com/akkuraina/pehredaar/internal/web"
 )
 
-// runServe is `pehredaar run`: sync sources.yaml, then run the scheduler
-// and the local dashboard until Ctrl+C.
+// runServe is `pehredaar run`: sync sources.yaml, then run the scheduler,
+// the outbox, the Telegram bot, the public website and the local operator
+// dashboard until Ctrl+C.
 func runServe(ctx context.Context, args []string) error {
 	// First, because the flag defaults below read the environment.
 	fromDotEnv, err := config.LoadDotEnv(".env")
@@ -43,6 +47,8 @@ func runServe(ctx context.Context, args []string) error {
 	sourcesPath := fs.String("sources", envOr("PEHREDAAR_SOURCES", "sources.yaml"), "curated sources file")
 	addr := fs.String("http", envOr("PEHREDAAR_HTTP", "127.0.0.1:8787"), "dashboard address (localhost only)")
 	workers := fs.Int("workers", envInt("PEHREDAAR_WORKERS", 4), "concurrent checks")
+	public := fs.String("public", envOr("PEHREDAAR_PUBLIC", "127.0.0.1:8788"), "public website address")
+	baseURL := fs.String("base-url", os.Getenv("PEHREDAAR_BASE_URL"), "the website's public URL, for links in emails and Telegram (default http://<public>)")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pehredaar run [flags]")
 		fs.PrintDefaults()
@@ -52,6 +58,9 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	if err := requireLoopback(*addr); err != nil {
 		return err
+	}
+	if *baseURL == "" {
+		*baseURL = "http://" + *public
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -101,20 +110,32 @@ func runServe(ctx context.Context, args []string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// errgroup runs the scheduler and the web server side by side. If either
-	// fails, gctx is cancelled and the other one shuts down too; Wait
-	// returns the first error.
-	// The bot and the outbox only run with a token. Without one, changes
-	// are still detected and stay pending; they go out once a token is set
-	// (unless older than outbox.MaxAge).
+	// Alert channels. Each is optional; the outbox skips channels without
+	// a sender, and the website only offers the channels that exist.
+	senders := map[store.Channel]outbox.Sender{}
 	var tg *notifier.Bot
 	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
-		tg, err = notifier.New(token, st, sources.Categories(), log)
+		tg, err = notifier.New(token, st, sources.Categories(), *baseURL, log)
 		if err != nil {
 			return err
 		}
+		senders[store.ChannelTelegram] = tg
 	} else {
-		log.Warn("TELEGRAM_BOT_TOKEN is not set: running without the Telegram bot; no alerts will be sent")
+		log.Warn("TELEGRAM_BOT_TOKEN is not set: running without the Telegram bot")
+	}
+	signer, err := auth.LoadSigner(ctx, st)
+	if err != nil {
+		return err
+	}
+	var mailer *email.Sender
+	if key := os.Getenv("RESEND_API_KEY"); key != "" {
+		mailer = email.New(email.Config{
+			APIKey: key, From: os.Getenv("PEHREDAAR_EMAIL_FROM"), BaseURL: *baseURL, Signer: signer, Logger: log,
+		})
+		senders[store.ChannelEmail] = mailer
+		log.Info("email via Resend", "from", envOr("PEHREDAAR_EMAIL_FROM", email.DefaultFrom))
+	} else {
+		log.Warn("RESEND_API_KEY is not set: no email sign-ups or alerts")
 	}
 
 	// Claude writes the summaries when a key is set; otherwise alerts use
@@ -124,38 +145,74 @@ func runServe(ctx context.Context, args []string) error {
 		model := envOr("PEHREDAAR_LLM_MODEL", summarizer.DefaultModel)
 		sum = summarizer.NewClaude(key, model, log)
 		log.Info("summaries by Claude", "model", model)
-	} else if tg != nil {
+	} else {
 		log.Info("ANTHROPIC_API_KEY is not set: alerts use the plain template")
 	}
 
+	site, err := web.New(web.Config{
+		Store: st, Signer: signer, Categories: sources.Categories(), BaseURL: *baseURL, Logger: log,
+		Mailer: mailerOrNil(mailer),
+		BotUsername: func() string {
+			if tg == nil {
+				return ""
+			}
+			return tg.Username()
+		},
+	})
+	if err != nil {
+		return err
+	}
+	pub := &http.Server{
+		Addr:              *public,
+		Handler:           site.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// No WriteTimeout: /events streams for as long as a page is open.
+	}
+
+	// The outbox always runs, even with no channel configured: it also
+	// writes the summaries the website shows. errgroup runs everything side
+	// by side; if one part fails, gctx is cancelled, the others shut down,
+	// and Wait returns the first error.
+	proc := outbox.New(outbox.Config{
+		Store:      st,
+		Summarizer: sum,
+		Senders:    senders,
+		Categories: sources.Categories(),
+		Logger:     log,
+	})
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sched.Run(gctx) })
+	g.Go(func() error { return proc.Run(gctx) })
+	g.Go(func() error { return site.Hub().Run(gctx) })
 	if tg != nil {
-		proc := outbox.New(outbox.Config{
-			Store:      st,
-			Summarizer: sum,
-			Senders:    map[store.Channel]outbox.Sender{store.ChannelTelegram: tg},
-			Categories: sources.Categories(),
-			Logger:     log,
-		})
 		g.Go(func() error { return tg.Run(gctx) })
-		g.Go(func() error { return proc.Run(gctx) })
 	}
-	g.Go(func() error {
-		log.Info("dashboard listening", "url", "http://"+*addr)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	})
-	g.Go(func() error {
-		<-gctx.Done()
-		// A fresh context: gctx is already cancelled, and Shutdown needs time
-		// to let open requests (like a running "check now") finish.
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutdownCtx)
-	})
+	for _, s := range []struct {
+		name string
+		srv  *http.Server
+		url  string
+	}{{"dashboard", srv, "http://" + *addr}, {"website", pub, *baseURL}} {
+		g.Go(func() error {
+			log.Info(s.name+" listening", "url", s.url)
+			if err := s.srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("%s: %w", s.name, err)
+			}
+			return nil
+		})
+		g.Go(func() error {
+			<-gctx.Done()
+			// A fresh context: gctx is already cancelled, and Shutdown needs
+			// time to let open requests (like a running "check now") finish.
+			// Open /events streams don't end on their own, hence the cap.
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.srv.Shutdown(shutdownCtx); err != nil {
+				s.srv.Close()
+			}
+			return nil
+		})
+	}
 	err = g.Wait()
 	log.Info("stopped")
 	return err
@@ -175,6 +232,16 @@ func requireLoopback(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("-http %q: the dashboard has no login, so it only listens on localhost (e.g. 127.0.0.1:8787)", addr)
+}
+
+// mailerOrNil keeps a nil *email.Sender from becoming a non-nil
+// web.Mailer interface holding a nil pointer (a classic Go gotcha: the
+// website would think email is configured, then crash using it).
+func mailerOrNil(m *email.Sender) web.Mailer {
+	if m == nil {
+		return nil
+	}
+	return m
 }
 
 func envOr(key, def string) string {
