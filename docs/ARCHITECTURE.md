@@ -755,6 +755,9 @@ summary, even when nobody is subscribed, because the site shows every change.
 - Sessions are stateless HMAC-signed cookies (30 days, HttpOnly,
   SameSite=Lax, Secure on https). The key is generated on first run and
   stored in `settings`.
+- Behind a proxy, the visitor's address for rate limiting is read from
+  `X-Forwarded-For`, right to left, skipping `PEHREDAAR_TRUSTED_PROXIES`;
+  entries a visitor could forge (left of our proxies) are never used.
 - Abuse: `http.CrossOriginProtection` on all POSTs (except one-click
   unsubscribe, which mail providers call server to server), 10 form posts
   per minute per IP, a hidden honeypot field, a strict CSP.
@@ -773,8 +776,6 @@ plain-text part, in English or Hindi.
   account owner's address (the default sender is `onboarding@resend.dev`).
 - Bounce and complaint webhooks from Resend (to deactivate dead addresses).
   They need a public URL; until then, unsubscribing is the only automatic path.
-- Behind a reverse proxy, per-IP limits see the proxy's address; trusting
-  `X-Forwarded-For` is a deploy-time decision.
 - The site's own UI is English; Hindi is used for alerts and the bot.
 - Fonts load from Google Fonts (disclosed on `/privacy`); self-hosting them
   would remove that third party.

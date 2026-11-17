@@ -1,0 +1,40 @@
+# systemd unit for running Pehredaar on a Linux VPS.
+#
+#   sudo useradd --system --home-dir /opt/pehredaar pehredaar
+#   sudo mkdir -p /opt/pehredaar/data
+#   # copy the binary, sources.yaml and .env into /opt/pehredaar
+#   sudo chown -R pehredaar /opt/pehredaar/data
+#   sudo cp deploy/pehredaar.service /etc/systemd/system/
+#   sudo systemctl enable --now pehredaar
+#   journalctl -u pehredaar -f      # logs
+#
+# Secrets and settings go in /opt/pehredaar/.env (pehredaar run reads it),
+# for example:
+#   PEHREDAAR_BASE_URL=https://pehredaar.example
+#   PEHREDAAR_TRUSTED_PROXIES=127.0.0.1   # Caddy, on this machine
+#   TELEGRAM_BOT_TOKEN=...  ANTHROPIC_API_KEY=...  RESEND_API_KEY=...
+
+[Unit]
+Description=Pehredaar, the exam notice watcher
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pehredaar
+Group=pehredaar
+WorkingDirectory=/opt/pehredaar
+ExecStart=/opt/pehredaar/pehredaar run
+Restart=on-failure
+RestartSec=5
+# pehredaar shuts down cleanly on SIGTERM within a few seconds.
+TimeoutStopSec=20
+
+# Hardening: read-only system, writable data directory only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/pehredaar/data
+
+[Install]
+WantedBy=multi-user.target

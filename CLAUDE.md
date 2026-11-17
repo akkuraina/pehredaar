@@ -100,6 +100,11 @@ Resend account owner's address. Summaries use
 Claude Haiku 5.5 (`claude-haiku-5-5`); override with `PEHREDAAR_LLM_MODEL`.
 
 State lives in `data/pehredaar.db` (gitignored). Delete it to start fresh.
+
+The race detector can't run on Windows here (32-bit MinGW only). WSL Ubuntu
+has Go and gcc: `wsl -e sh -c "cd /mnt/d/DJSCE/CODING/pehredaar && /usr/local/go/bin/go test -race ./..."`
+also runs the suite on Linux. WSL has no `pdftotext`, so PDF tests skip there.
+Deploy files: `Dockerfile`, `deploy/` (systemd + Caddy); see README "Deploying".
 Port 8080 is taken by a local Apache on the dev machine, hence 8787.
 
 ## Core tables

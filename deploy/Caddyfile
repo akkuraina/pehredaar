@@ -1,0 +1,14 @@
+# Caddy in front of Pehredaar on a VPS: automatic HTTPS (Let's Encrypt)
+# and a reverse proxy to the website on 127.0.0.1:8788.
+# Replace the domain, put this at /etc/caddy/Caddyfile, then
+#   sudo systemctl reload caddy
+
+pehredaar.example {
+	# Compress pages, but not the live-update stream: a compressor may
+	# buffer events instead of sending them as they happen.
+	@compressible not path /events
+	encode @compressible zstd gzip
+
+	# Caddy flushes text/event-stream responses immediately by itself.
+	reverse_proxy 127.0.0.1:8788
+}

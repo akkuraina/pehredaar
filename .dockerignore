@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+bin/
+data/
+*.db
+*.db-*
+docs/
+.vscode/
+.idea/

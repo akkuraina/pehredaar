@@ -227,7 +227,8 @@ go test ./...                        # all tests; none touch SSC, Telegram or An
 | `PEHREDAAR_SOURCES` | Sources file | `sources.yaml` |
 | `PEHREDAAR_WORKERS` | Concurrent checks | `4` |
 | `PEHREDAAR_HTTP` | Dashboard address (localhost only) | `127.0.0.1:8787` |
-| `PEHREDAAR_PUBLIC` | Website address | `127.0.0.1:8788` |
+| `PEHREDAAR_PUBLIC` | Website address | `0.0.0.0:$PORT` if `PORT` is set, else `127.0.0.1:8788` |
+| `PEHREDAAR_TRUSTED_PROXIES` | Reverse proxies whose `X-Forwarded-For` is believed (IPs, CIDRs, or `private`). Needed behind any proxy, or all visitors share one rate limit | unset |
 | `PEHREDAAR_BASE_URL` | The website's public URL, used in email and Telegram links | `http://` + `PEHREDAAR_PUBLIC` |
 | `RESEND_API_KEY` | Email via Resend. Unset: no email sign-ups or alerts | unset |
 | `PEHREDAAR_EMAIL_FROM` | Email sender | `Pehredaar <onboarding@resend.dev>` |
@@ -235,6 +236,47 @@ go test ./...                        # all tests; none touch SSC, Telegram or An
 
 Sources are curated by hand in [`sources.yaml`](sources.yaml) and synced into
 the database at startup.
+
+## Deploying
+
+Pehredaar is one always-on process with a SQLite file, so it needs a host
+that keeps a process running and a disk that survives deploys, and **exactly
+one instance** (two would both poll the Telegram bot and fight over the
+database). Serverless platforms like Vercel don't fit. Before choosing a
+region, check that the government sites answer from it:
+`pehredaar probe <feed URL>` from a trial machine there.
+
+Whichever host:
+
+- Set `PEHREDAAR_BASE_URL` to the public `https://` address (used in email
+  and Telegram links; it also turns on `Secure` cookies).
+- Set `PEHREDAAR_TRUSTED_PROXIES`, since every option below puts a proxy in
+  front: `127.0.0.1` behind Caddy on the same machine, `private` on Railway
+  or Render.
+- Point the platform's health check at `/healthz` (200 while the database
+  answers).
+- The operator dashboard only listens on localhost inside the machine or
+  container. On a VPS, reach it with `ssh -L 8787:127.0.0.1:8787 <server>`.
+
+**Docker (Railway, Render, or any container host).** The `Dockerfile`
+builds a static binary and adds `pdftotext` (poppler). Mount a persistent
+volume at `/data`; the site listens on `$PORT`, which these platforms set.
+
+```sh
+docker build -t pehredaar .
+docker run -p 8788:8788 -v pehredaar-data:/data --env-file .env pehredaar
+```
+
+The container runs as a non-root user. If your platform mounts the volume
+owned by root and the database can't be created, check its docs for running
+as root or fixing volume permissions.
+
+**A Linux VPS.** Build on Windows with
+`$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o pehredaar ./cmd/pehredaar`,
+copy it to the server with `sources.yaml` and `.env`, install
+`poppler-utils`, and use [`deploy/pehredaar.service`](deploy/pehredaar.service)
+(systemd, with setup steps in the file) and
+[`deploy/Caddyfile`](deploy/Caddyfile) (HTTPS and the reverse proxy).
 
 ## Project layout
 
@@ -255,6 +297,8 @@ internal/
   web/             the public website (templates, CSS, JS embedded in the binary)
   store/           Store interface + SQLite implementation
   dashboard/       local operator web UI
+deploy/            systemd unit and Caddyfile for a VPS
+Dockerfile         container image (binary + pdftotext)
 docs/
   ARCHITECTURE.md  full design and decisions
   SCALING.md       plan for thousands of users
