@@ -103,8 +103,12 @@ internal/
   differ/               canonical text A vs B → structured Diff
   summarizer/           Summarizer interface; template impl (also the fallback); LLM impl
   notifier/             Telegram: alert sending (rate limits, retries), bot command handlers
-  outbox/               pending changes → summaries → routed alerts (§7)
+  email/                Resend client; alert, confirm and sign-in emails (§20)
+  auth/                 one-time tokens, HMAC-signed session cookies and unsubscribe links
+  exams/                catalog of exams the survey offers (live or "coming soon")
+  outbox/               pending changes → summaries → alerts, one Sender per channel (§7)
   scheduler/            polling loop, worker pool, backoff, fetch→normalize→diff→save
+  web/                  public website: landing, survey, sign-in, live feed (§20)
   dashboard/            local operator web UI (html/template, read-mostly)
 testdata/               saved JSON/PDF/HTML fixtures (shared by tests)
 docs/                   this file and future design notes
@@ -207,10 +211,12 @@ erDiagram
     sources ||--o{ changes : has
     sources ||--o{ sources : "parent (discovered PDFs)"
     snapshots ||--o{ changes : "old/new"
+    subscribers ||--o{ contacts : "reached via"
     subscribers ||--o{ subscriptions : has
+    subscribers ||--o{ interests : "wants watched"
     subscriptions }o--o| sources : "source target"
     changes ||--o{ deliveries : "sent to"
-    subscribers ||--o{ deliveries : receives
+    contacts ||--o{ deliveries : receives
 ```
 
 | Table | Columns | Notes |
@@ -219,9 +225,13 @@ erDiagram
 | `snapshots` | `id, source_id, content_hash, text, fetched_at` | `text` is the **normalized** text. Index `(source_id, fetched_at DESC)`. |
 | `changes` | `id, source_id, old_snapshot_id NULL, new_snapshot_id, kind (added/edited/removed), diff, importance, status, attempts, created_at` | `status`: `pending → summarized → notified`, or `suppressed` (cosmetic) / `failed`. |
 | `change_summaries` | `change_id, language, text` | PK `(change_id, language)`. One LLM summary per language actually needed, generated lazily and cached. |
-| `subscribers` | `id, telegram_id UNIQUE, chat_id, language (en/hi, default en), active, created_at` | `active=false` when a user blocks the bot. `language` = alert language. |
+| `subscribers` | `id, language (en/hi, default en), created_at` | A **person**. Since migration 3 (2026-11-17), identity lives in `contacts`. |
+| `contacts` | `id, subscriber_id, channel (telegram/email), address, chat_id NULL, verified_at NULL, active, created_at` | `UNIQUE (channel, address)`. Telegram address = user id as text; email lower-cased. Alerts go to contacts that are verified **and** active. `active=false` after a block, unsubscribe or bounce. |
 | `subscriptions` | `id, subscriber_id, source_id NULL, category NULL, created_at` | `CHECK ((source_id IS NULL) <> (category IS NULL))`. Unique per target. |
-| `deliveries` | `change_id, subscriber_id, sent_at` | PK on both columns. Guarantees **at most one** alert per user per change. |
+| `interests` | `subscriber_id, exam, created_at` | Exams from the sign-up survey (`internal/exams`), including ones not watched yet, so we know whom to tell when they go live. |
+| `deliveries` | `change_id, contact_id, sent_at` | PK on both columns. Guarantees **at most one** alert per contact per change (one per channel per person). |
+| `tokens` | `hash PK, purpose (verify-email/login/link-telegram), subscriber_id, contact_id NULL, expires_at, used_at NULL` | One-time links. Only SHA-256 hashes are stored. |
+| `settings` | `key PK, value` | The HMAC signing key for sessions and unsubscribe links, created on first run. |
 
 **Category** is the unit users subscribe to in v1 (**feed-level, decided**),
 e.g. `ssc:notice-board`, `ssc:calendar`, `ssc:results`. A discovered PDF
@@ -462,6 +472,8 @@ webhook is needed while running on a laptop.
 | `/watch` | Inline keyboard of categories (✅ on watched ones); tap to subscribe |
 | `/list`  | Current subscriptions with an inline "stop" button each |
 | `/stop`  | Inline keyboard of current subscriptions to remove (`/stop all` to clear) |
+| `/start <token>` | Deep link from the website's survey: attaches this Telegram account to the web sign-up (merging an older bot-only subscriber into it) |
+| `/feed` | Replies with a one-time, 30-minute link that signs in to the website |
 
 Bot messages follow the subscriber's language. Button taps edit the message
 in place rather than sending new ones. Category names are the `label`s from
@@ -487,8 +499,8 @@ are never quoted (garbled text). Links: the PDF itself, or the attachments of
 new/edited feed items (max 3). Link previews are off.
 
 Sending respects Telegram limits (≈30 msgs/s globally, 1/s per chat) with a
-limiter. A 403 "bot was blocked" response marks the subscriber `active=false`;
-any later message to the bot (e.g. `/start`) reactivates them.
+limiter. A 403 "bot was blocked" response marks the Telegram contact `active=false`;
+any later message to the bot (e.g. `/start`) reactivates it.
 
 ---
 
@@ -688,3 +700,81 @@ feed) once there are dozens of feeds. Each site gets the SSC treatment
 before it goes in sources.yaml: probe it, save fixtures, and measure noise
 across fetches.
 
+---
+
+## 20. Public website and email (built 2026-11-17)
+
+Decided with the author: email is the second channel (no WhatsApp/SMS for
+now), sent through **Resend**; a Go-served public site; an **owl persona**.
+
+**Persona.** Pehredaar is a sharp-eyed owl: "I don't blink. You don't have
+to." Modern and a little playful, mostly English with some Hindi, first
+person ("I caught it"). Night-sky palette with amber eyes. The same voice is
+used on the site, in emails and in the bot. The owl is one inline SVG
+(`templates/layout.html`) whose pupils follow the pointer; it never blinks.
+
+**Pages** (`internal/web`, served by `pehredaar run` on `PEHREDAAR_PUBLIC`,
+default `127.0.0.1:8788`; separate from the localhost-only dashboard):
+
+| Path | What |
+|---|---|
+| `/` | Landing: hero, live "watching now" pulse, a real old → new catch animated, live ticker of caught changes, exam grid (SSC live, the rest "soon") |
+| `/join` | Survey, four steps: exams, feeds (only for live exams), Telegram / email / both, language. One step at a time with JS; one long form without. Signed in, it edits settings |
+| `/confirm/{t}`, `/l/{t}` | Email confirmation and sign-in links (one-time) |
+| `/login` | Email a sign-in link; Telegram users send `/feed` to the bot |
+| `/feed` | Personal feed: caught changes for their feeds (live), "on the notice board now" (current items from the latest snapshots), "coming soon" for exams not watched yet, contact status, delete account |
+| `/c/{id}` | One change, shareable; linked from alert emails |
+| `/u/{signed}` | Unsubscribe: GET asks, POST does it (also RFC 8058 one-click) |
+| `/events` | Server-Sent Events: rendered cards for new changes, stats for the pulse |
+
+Everything on the cards and the landing page is real data from the store;
+nothing is invented. Every page works without JavaScript. JS adds motion
+(eye tracking, word cycling, scroll reveals, count-ups, the strike-and-type
+spotlight) and live updates, all of it off under `prefers-reduced-motion`.
+
+**Live updates.** One `Hub` goroutine polls the store every 3s for new
+changes and stats and fans them out to each open `/events` stream (a
+buffered channel per page; a slow page drops an update rather than stalling
+others; capped at 2000 streams). A change is announced once it is
+summarized (or after 2 minutes, with the template text), so live cards read
+like the alert. The outbox now always runs and always writes an English
+summary, even when nobody is subscribed, because the site shows every change.
+
+**Sign-up and sign-in.** No passwords:
+
+- Survey submitted: a subscriber is created and the browser gets a session
+  for it (the visitor made it). Email contacts start unverified and get a
+  confirmation link (48 h); no alert goes to an address until it is
+  confirmed. Telegram: the page shows `t.me/<bot>?start=<token>` (24 h), and
+  `/start <token>` links the account.
+- An email that is already known is never attached or changed from an
+  unauthenticated form: its owner gets a sign-in link instead, and the
+  visitor sees the same "check your inbox" page either way (no account
+  enumeration). Emails are sent in the background, so timing doesn't leak
+  it either.
+- Sessions are stateless HMAC-signed cookies (30 days, HttpOnly,
+  SameSite=Lax, Secure on https). The key is generated on first run and
+  stored in `settings`.
+- Abuse: `http.CrossOriginProtection` on all POSTs (except one-click
+  unsubscribe, which mail providers call server to server), 10 form posts
+  per minute per IP, a hidden honeypot field, a strict CSP.
+
+**Email** (`internal/email`): Resend's `POST /emails` with an
+`Idempotency-Key` per (change, contact), so a retry or a restart within 24 h
+can't send an alert twice. 429 and 5xx are retried (honouring
+`Retry-After`); other 4xx and exhausted quotas are not. Alert emails carry
+`List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+which Gmail and Yahoo require of bulk senders. Inline-styled HTML plus a
+plain-text part, in English or Hindi.
+
+**Not done yet:**
+
+- A sending domain. Until one is verified in Resend, it only delivers to the
+  account owner's address (the default sender is `onboarding@resend.dev`).
+- Bounce and complaint webhooks from Resend (to deactivate dead addresses).
+  They need a public URL; until then, unsubscribing is the only automatic path.
+- Behind a reverse proxy, per-IP limits see the proxy's address; trusting
+  `X-Forwarded-For` is a deploy-time decision.
+- The site's own UI is English; Hindi is used for alerts and the bot.
+- Fonts load from Google Fonts (disclosed on `/privacy`); self-hosting them
+  would remove that third party.
