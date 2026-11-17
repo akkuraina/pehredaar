@@ -123,6 +123,23 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+func TestRetireAfter(t *testing.T) {
+	const src = "sources:\n  - label: A\n    kind: feed\n    category: c\n    languages: [en]\n    url: https://example.test/a\n    interval: 15m\n"
+	for yml, want := range map[string]time.Duration{
+		"":                               120 * 24 * time.Hour, // default
+		"discovered_retire_after: 30d\n": 30 * 24 * time.Hour,
+		"discovered_retire_after: 48h\n": 48 * time.Hour,
+	} {
+		s, err := ParseSources([]byte(yml+src), testNow)
+		if err != nil {
+			t.Fatalf("%q: %v", yml, err)
+		}
+		if s.RetireAfter != want {
+			t.Errorf("%q: RetireAfter = %v, want %v", yml, s.RetireAfter, want)
+		}
+	}
+}
+
 func TestSync(t *testing.T) {
 	st, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

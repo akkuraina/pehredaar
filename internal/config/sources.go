@@ -40,6 +40,9 @@ type Sources struct {
 
 	// DiscoveredInterval is how often PDFs found in feeds are re-checked.
 	DiscoveredInterval time.Duration
+	// RetireAfter is how long a discovered PDF is watched before it is
+	// retired, so the watch set doesn't grow forever.
+	RetireAfter time.Duration
 }
 
 // Category is a subscription unit as shown to users.
@@ -79,6 +82,7 @@ func (s Sources) ByURL() map[string]Source {
 // while the rest of the program gets validated, ready-to-use values.
 type fileYAML struct {
 	DiscoveredInterval string       `yaml:"discovered_interval"`
+	RetireAfter        string       `yaml:"discovered_retire_after"`
 	Sources            []sourceYAML `yaml:"sources"`
 }
 
@@ -135,6 +139,14 @@ func ParseSources(data []byte, now time.Time) (Sources, error) {
 			return Sources{}, fmt.Errorf("discovered_interval: %w", err)
 		}
 		out.DiscoveredInterval = d
+	}
+	out.RetireAfter = 120 * 24 * time.Hour
+	if f.RetireAfter != "" {
+		d, err := parseDays(f.RetireAfter)
+		if err != nil {
+			return Sources{}, fmt.Errorf("discovered_retire_after: %w", err)
+		}
+		out.RetireAfter = d
 	}
 
 	seen := make(map[string]string) // URL -> label, to catch duplicates
@@ -237,6 +249,29 @@ func parseInterval(s string) (time.Duration, error) {
 	// Politeness floor: nothing on a government site changes minute by minute.
 	if d < minInterval {
 		return 0, fmt.Errorf("%v is shorter than the %v minimum", d, minInterval)
+	}
+	return d, nil
+}
+
+// parseDays accepts "120d" as well as Go durations ("2880h"). Go's
+// time.ParseDuration stops at hours because days aren't always 24h long
+// (DST); for a retirement period that doesn't matter.
+func parseDays(s string) (time.Duration, error) {
+	var d time.Duration
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.Atoi(n)
+		if err != nil {
+			return 0, fmt.Errorf("%q: want e.g. 120d", s)
+		}
+		d = time.Duration(days) * 24 * time.Hour
+	} else {
+		var err error
+		if d, err = time.ParseDuration(s); err != nil {
+			return 0, err
+		}
+	}
+	if d < 24*time.Hour {
+		return 0, fmt.Errorf("%v is shorter than a day", d)
 	}
 	return d, nil
 }

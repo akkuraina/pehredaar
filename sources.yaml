@@ -13,6 +13,10 @@
 
 # How often PDFs discovered in feeds are re-checked.
 discovered_interval: 6h
+# After this long a discovered PDF is retired (no longer checked). Notices
+# rarely change months after they're published, and without a limit the
+# watch set would only ever grow.
+discovered_retire_after: 120d
 
 sources:
   - label: SSC Notice Board
