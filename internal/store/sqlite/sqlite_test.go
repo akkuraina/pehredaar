@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"io/fs"
 	"path/filepath"
 	"testing"
 
@@ -24,6 +25,10 @@ func TestConformance(t *testing.T) {
 }
 
 func TestMigrationsAreIdempotent(t *testing.T) {
+	files, err := fs.Glob(migrationsFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "test.db")
 	for i := range 2 {
 		s, err := Open(t.Context(), path)
@@ -34,8 +39,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
 			t.Fatal(err)
 		}
-		if applied != 1 {
-			t.Errorf("open #%d: %d migrations recorded, want 1", i+1, applied)
+		if applied != len(files) {
+			t.Errorf("open #%d: %d migrations recorded, want %d", i+1, applied, len(files))
 		}
 		s.Close()
 	}

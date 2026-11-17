@@ -33,6 +33,9 @@ func Run(t *testing.T, open Opener) {
 		{"DueSources", testDueSources},
 		{"RecordCheck", testRecordCheck},
 		{"DisableCuratedExcept", testDisableCuratedExcept},
+		{"DisableSourceIsStickyForDiscovered", testDisableSourceSticky},
+		{"RetireDiscovered", testRetireDiscovered},
+		{"Reschedule", testReschedule},
 		{"Categories", testCategories},
 		{"Snapshots", testSnapshots},
 		{"SaveSnapshotIsAtomic", testSaveSnapshotAtomic},
@@ -279,6 +282,84 @@ func testDisableCuratedExcept(t *testing.T, s store.Store) {
 		if got.Enabled != c.want {
 			t.Errorf("source %s enabled = %v, want %v", got.URL, got.Enabled, c.want)
 		}
+	}
+	if got, _ := s.Source(ctx(t), drop.ID); got.DisabledReason != store.DisabledRemoved {
+		t.Errorf("dropped source reason = %q, want %q", got.DisabledReason, store.DisabledRemoved)
+	}
+}
+
+func mustPDF(t *testing.T, s store.Store, url string, parent int64) store.Source {
+	t.Helper()
+	src, err := s.UpsertSource(ctx(t), store.Source{
+		URL: url, Kind: store.KindPDF, Category: "c", Language: store.LangEnglish,
+		ParentID: parent, CheckInterval: time.Hour, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertSource(%s): %v", url, err)
+	}
+	return src
+}
+
+func testDisableSourceSticky(t *testing.T, s store.Store) {
+	feed := mustSource(t, s, "https://example.test/feed", "c")
+	pdf := mustPDF(t, s, "https://example.test/a.pdf", feed.ID)
+
+	if err := s.DisableSource(ctx(t), pdf.ID, store.DisabledGone); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DisableSource(ctx(t), feed.ID, store.DisabledGone); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DisableSource(ctx(t), 9999, store.DisabledGone); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("DisableSource(missing) err = %v, want ErrNotFound", err)
+	}
+
+	// The feed lists the PDF again: rediscovery must not re-enable it.
+	again := mustPDF(t, s, pdf.URL, feed.ID)
+	if again.Enabled || again.DisabledReason != store.DisabledGone {
+		t.Errorf("rediscovered PDF: enabled=%v reason=%q, want disabled/gone", again.Enabled, again.DisabledReason)
+	}
+
+	// Re-syncing a curated source from the yaml retries it.
+	back := mustSource(t, s, feed.URL, "c")
+	if !back.Enabled || back.DisabledReason != "" {
+		t.Errorf("re-synced curated source: enabled=%v reason=%q, want enabled/empty", back.Enabled, back.DisabledReason)
+	}
+}
+
+func testRetireDiscovered(t *testing.T, s store.Store) {
+	feed := mustSource(t, s, "https://example.test/feed", "c")
+	pdf := mustPDF(t, s, "https://example.test/old.pdf", feed.ID)
+
+	// Nothing was created before an hour ago.
+	if n, err := s.RetireDiscovered(ctx(t), time.Now().Add(-time.Hour)); err != nil || n != 0 {
+		t.Fatalf("RetireDiscovered(past) = %d, %v; want 0", n, err)
+	}
+	n, err := s.RetireDiscovered(ctx(t), time.Now().Add(time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("RetireDiscovered(future) = %d, %v; want 1 (curated feeds are never retired)", n, err)
+	}
+	got, _ := s.Source(ctx(t), pdf.ID)
+	if got.Enabled || got.DisabledReason != store.DisabledRetired {
+		t.Errorf("retired PDF: enabled=%v reason=%q", got.Enabled, got.DisabledReason)
+	}
+	if got, _ := s.Source(ctx(t), feed.ID); !got.Enabled {
+		t.Error("curated feed was retired")
+	}
+}
+
+func testReschedule(t *testing.T, s store.Store) {
+	src := mustSource(t, s, "https://example.test/r", "c")
+	next := time.Now().Add(42 * time.Minute).Truncate(time.Millisecond)
+	if err := s.Reschedule(ctx(t), src.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Source(ctx(t), src.ID)
+	if !got.NextCheckAt.Equal(next) {
+		t.Errorf("NextCheckAt = %v, want %v", got.NextCheckAt, next)
+	}
+	if err := s.Reschedule(ctx(t), 9999, next); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("Reschedule(missing) err = %v, want ErrNotFound", err)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 
 const sourceColumns = `id, url, kind, category, language, label, parent_id,
 	check_interval_sec, enabled, etag, last_modified, last_checked_at,
-	next_check_at, consecutive_failures, last_error, created_at`
+	next_check_at, consecutive_failures, last_error, created_at, disabled_reason`
 
 func scanSource(sc scanner) (store.Source, error) {
 	var (
@@ -24,7 +24,7 @@ func scanSource(sc scanner) (store.Source, error) {
 	)
 	err := sc.Scan(&s.ID, &s.URL, &s.Kind, &s.Category, &s.Language, &s.Label, &parentID,
 		&intervalSec, &s.Enabled, &s.ETag, &s.LastModified, &lastChecked,
-		&nextCheck, &s.ConsecutiveFailures, &s.LastError, &createdAt)
+		&nextCheck, &s.ConsecutiveFailures, &s.LastError, &createdAt, &s.DisabledReason)
 	if err != nil {
 		return store.Source{}, err
 	}
@@ -59,6 +59,12 @@ func (s *Store) UpsertSource(ctx context.Context, src store.Source) (store.Sourc
 	// ON CONFLICT ... DO UPDATE ("upsert") touches only the curated columns,
 	// so re-syncing sources.yaml never resets ETags, schedules or failure
 	// counts. `excluded` refers to the row we tried to insert.
+	//
+	// The CASE keeps a discovered source that the scheduler disabled (gone,
+	// needs-ocr, retired) disabled: feeds re-upsert their attachments with
+	// Enabled true on every change. In SQLite's UPDATE, every column on the
+	// right-hand side reads the row's old values, so both CASEs see the
+	// original disabled_reason.
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO sources (url, kind, category, language, label, parent_id,
@@ -71,7 +77,12 @@ func (s *Store) UpsertSource(ctx context.Context, src store.Source) (store.Sourc
 			label              = excluded.label,
 			parent_id          = excluded.parent_id,
 			check_interval_sec = excluded.check_interval_sec,
-			enabled            = excluded.enabled
+			enabled            = CASE WHEN sources.parent_id IS NOT NULL AND sources.disabled_reason != ''
+			                          THEN 0 ELSE excluded.enabled END,
+			disabled_reason    = CASE WHEN sources.parent_id IS NOT NULL AND sources.disabled_reason != ''
+			                          THEN sources.disabled_reason
+			                          WHEN excluded.enabled THEN ''
+			                          ELSE sources.disabled_reason END
 		RETURNING id`,
 		src.URL, src.Kind, src.Category, src.Language, src.Label, nullID(src.ParentID),
 		int64(src.CheckInterval/time.Second), src.Enabled, toMillis(s.now()),
@@ -166,7 +177,8 @@ func (s *Store) RecordCheck(ctx context.Context, sourceID int64, r store.CheckRe
 }
 
 func (s *Store) DisableCuratedExcept(ctx context.Context, keepURLs []string) (int64, error) {
-	query := `UPDATE sources SET enabled = 0 WHERE parent_id IS NULL AND enabled = 1`
+	query := `UPDATE sources SET enabled = 0, disabled_reason = 'removed'
+		WHERE parent_id IS NULL AND enabled = 1`
 	args := make([]any, len(keepURLs))
 	if len(keepURLs) > 0 {
 		// database/sql has no way to bind a slice, so we generate one "?"
@@ -181,6 +193,37 @@ func (s *Store) DisableCuratedExcept(ctx context.Context, keepURLs []string) (in
 		return 0, fmt.Errorf("sqlite: disable curated sources: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (s *Store) DisableSource(ctx context.Context, id int64, reason store.DisabledReason) error {
+	if reason == "" {
+		return errors.New("sqlite: disable source: reason is empty")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sources SET enabled = 0, disabled_reason = ? WHERE id = ?`, reason, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: disable source %d: %w", id, err)
+	}
+	return rowsAffectedOrNotFound(res, fmt.Sprintf("source %d", id))
+}
+
+func (s *Store) RetireDiscovered(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE sources SET enabled = 0, disabled_reason = 'retired'
+		WHERE parent_id IS NOT NULL AND enabled = 1 AND created_at < ?`, toMillis(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: retire discovered sources: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+func (s *Store) Reschedule(ctx context.Context, id int64, next time.Time) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sources SET next_check_at = ? WHERE id = ?`, toMillis(next), id)
+	if err != nil {
+		return fmt.Errorf("sqlite: reschedule source %d: %w", id, err)
+	}
+	return rowsAffectedOrNotFound(res, fmt.Sprintf("source %d", id))
 }
 
 func (s *Store) Categories(ctx context.Context) ([]string, error) {

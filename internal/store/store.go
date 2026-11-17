@@ -33,6 +33,22 @@ const (
 	LangHindi   Language = "hi"
 )
 
+// DisabledReason records why a source is no longer polled. Disabled
+// sources are kept, not deleted, so their snapshots and changes survive.
+type DisabledReason string
+
+const (
+	// DisabledRemoved: a curated source no longer in sources.yaml.
+	DisabledRemoved DisabledReason = "removed"
+	// DisabledGone: the URL answered 404/410 too many times in a row.
+	DisabledGone DisabledReason = "gone"
+	// DisabledNeedsOCR: a PDF with no extractable text (a scan). Polling it
+	// again would only fail again.
+	DisabledNeedsOCR DisabledReason = "needs-ocr"
+	// DisabledRetired: a discovered PDF past its watch period.
+	DisabledRetired DisabledReason = "retired"
+)
+
 // Source is one URL Pehredaar watches, plus the HTTP state needed to poll it
 // politely. The curated fields (URL..Enabled) come from sources.yaml or from
 // feed discovery; the rest is updated by the scheduler after each check.
@@ -46,6 +62,9 @@ type Source struct {
 	ParentID      int64 // feed this PDF was discovered from; 0 for curated sources
 	CheckInterval time.Duration
 	Enabled       bool
+	// DisabledReason says why a source stopped being polled. It is empty
+	// while Enabled is true.
+	DisabledReason DisabledReason
 
 	ETag                string // HTTP validators for conditional GET
 	LastModified        string
@@ -170,6 +189,10 @@ type Store interface {
 
 	// UpsertSource inserts a source, or updates the curated fields of the
 	// existing source with the same URL. Polling state is never overwritten.
+	// Enabling a curated source clears its DisabledReason (re-syncing
+	// sources.yaml retries it), but a discovered source the scheduler
+	// disabled stays disabled when its feed lists it again; otherwise
+	// discovery would undo retirement every time the feed changed.
 	UpsertSource(ctx context.Context, s Source) (Source, error)
 	Source(ctx context.Context, id int64) (Source, error)
 	// Sources lists every source, enabled or not, ordered by id (so curated
@@ -183,6 +206,13 @@ type Store interface {
 	// URL is not in keepURLs, used when syncing sources.yaml. It returns how
 	// many sources were disabled.
 	DisableCuratedExcept(ctx context.Context, keepURLs []string) (int64, error)
+	// DisableSource stops polling one source and records why.
+	DisableSource(ctx context.Context, id int64, reason DisabledReason) error
+	// RetireDiscovered disables discovered (parent_id set) sources created
+	// before cutoff and returns how many it disabled.
+	RetireDiscovered(ctx context.Context, cutoff time.Time) (int64, error)
+	// Reschedule sets when a source is next due, leaving all else alone.
+	Reschedule(ctx context.Context, id int64, next time.Time) error
 	// Categories lists the distinct categories of enabled sources, sorted.
 	Categories(ctx context.Context) ([]string, error)
 
