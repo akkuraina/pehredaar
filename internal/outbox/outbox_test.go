@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -348,5 +349,63 @@ func TestAlertLinksSkipBadRedirects(t *testing.T) {
 	got := alertLinks(src, diff)
 	if len(got) != 1 || got[0] != (notifier.Link{URL: "https://ssc.gov.in/x"}) {
 		t.Errorf("links = %+v", got)
+	}
+}
+
+// emailFake records email deliveries; addresses in bad are unreachable.
+type emailFake struct {
+	mu   sync.Mutex
+	sent []string
+	bad  map[string]bool
+}
+
+func (f *emailFake) Deliver(_ context.Context, to store.Recipient, _ notifier.Alert) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bad[to.Address] {
+		return fmt.Errorf("bounced: %w", notifier.ErrUnreachable)
+	}
+	f.sent = append(f.sent, to.Address)
+	return nil
+}
+
+func TestEveryChannelGetsTheAlertOnce(t *testing.T) {
+	e := newEnv(t, nil)
+	mail := &emailFake{bad: map[string]bool{"gone@example.test": true}}
+	e.p.senders[store.ChannelEmail] = mail
+	src := e.source(feedURL, store.KindFeed, store.LangEnglish)
+	ctx := t.Context()
+
+	both := e.subscriber(1, store.LangEnglish) // Telegram...
+	addEmail := func(sub store.Subscriber, addr string) store.Contact {
+		t.Helper()
+		c, err := e.st.AddEmail(ctx, sub.ID, addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.VerifyContact(ctx, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	addEmail(both, "asha@example.test") // ...and email
+	gone := addEmail(e.subscriber(2, store.LangEnglish), "gone@example.test")
+	// An unconfirmed address gets nothing.
+	if _, err := e.st.AddEmail(ctx, both.ID, "unconfirmed@example.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	e.change(src, store.ChangeAdded, addedDiff)
+	e.run()
+	e.run() // a second pass must not resend
+
+	if len(e.notif.sent) != 2 {
+		t.Errorf("telegram alerts = %d, want 2 (users 1 and 2)", len(e.notif.sent))
+	}
+	if len(mail.sent) != 1 || mail.sent[0] != "asha@example.test" {
+		t.Errorf("emails sent = %v, want only asha", mail.sent)
+	}
+	if c, _ := e.st.Contact(ctx, gone.ID); c.Active {
+		t.Error("bounced address still active")
 	}
 }
