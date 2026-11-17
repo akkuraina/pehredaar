@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +42,11 @@ type Config struct {
 	Sources    config.Sources
 	Workers    int           // concurrent checks; default 4
 	Poll       time.Duration // how often to look for due sources; default 10s
-	Logger     *slog.Logger
+	// CheckTimeout bounds one whole check (rate-limit wait, fetch,
+	// pdftotext, store writes), so nothing can pin a worker forever.
+	// Default 2m.
+	CheckTimeout time.Duration
+	Logger       *slog.Logger
 }
 
 // Scheduler polls sources. Create it with New; it is safe for concurrent
@@ -51,6 +57,8 @@ type Scheduler struct {
 	norm       *normalize.Normalizer
 	curated    map[string]config.Source // yaml-only settings by URL
 	discovered time.Duration
+	retire     time.Duration
+	timeout    time.Duration
 	workers    int
 	poll       time.Duration
 	log        *slog.Logger
@@ -67,6 +75,18 @@ type Scheduler struct {
 const (
 	maxEvents  = 300
 	maxBackoff = 6 * time.Hour
+
+	// goneAfter consecutive 404/410s disable a source. With the 6h backoff
+	// for permanent errors that is about a day, enough to ride out a
+	// botched site deploy.
+	goneAfter = 5
+
+	// After downtime, overdue discovered PDFs are spread over up to this
+	// long instead of all being checked at once on startup.
+	spreadWindow = 30 * time.Minute
+
+	// How often discovered PDFs are checked for retirement.
+	retireEvery = time.Hour
 )
 
 // New returns a Scheduler with defaults filled in.
@@ -77,6 +97,8 @@ func New(cfg Config) *Scheduler {
 		norm:       cfg.Normalizer,
 		curated:    cfg.Sources.ByURL(),
 		discovered: cfg.Sources.DiscoveredInterval,
+		retire:     cfg.Sources.RetireAfter,
+		timeout:    cfg.CheckTimeout,
 		workers:    cfg.Workers,
 		poll:       cfg.Poll,
 		log:        cfg.Logger,
@@ -92,6 +114,12 @@ func New(cfg Config) *Scheduler {
 	}
 	if s.discovered <= 0 {
 		s.discovered = 6 * time.Hour
+	}
+	if s.retire <= 0 {
+		s.retire = 120 * 24 * time.Hour
+	}
+	if s.timeout <= 0 {
+		s.timeout = 2 * time.Minute
 	}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -133,9 +161,18 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		wg.Wait()
 	}()
 
+	if err := s.spreadOverdue(ctx); err != nil && ctx.Err() == nil {
+		s.log.Error("spreading overdue sources", "err", err)
+	}
+
 	ticker := time.NewTicker(s.poll)
 	defer ticker.Stop()
+	var lastRetire time.Time
 	for {
+		if now := s.now(); now.Sub(lastRetire) >= retireEvery {
+			lastRetire = now
+			s.retireOld(ctx)
+		}
 		if err := s.dispatch(ctx, jobs); err != nil && ctx.Err() == nil {
 			s.log.Error("finding due sources", "err", err)
 		}
@@ -164,6 +201,49 @@ func (s *Scheduler) dispatch(ctx context.Context, jobs chan<- store.Source) erro
 		}
 	}
 	return nil
+}
+
+// spreadOverdue runs once at startup. After the process was off for a
+// while, every discovered PDF is overdue, and checking them all at once
+// would queue hundreds of requests to one host behind its rate limit,
+// delaying the curated feeds that matter most. So curated feeds stay due
+// now and overdue PDFs get a random slot in the next spreadWindow (or
+// their interval, if shorter). Their schedules stay spread afterwards
+// because each one's next check is computed from when it actually ran.
+func (s *Scheduler) spreadOverdue(ctx context.Context) error {
+	now := s.now()
+	due, err := s.store.DueSources(ctx, now, 100_000)
+	if err != nil {
+		return err
+	}
+	n := 0
+	for _, src := range due {
+		if src.ParentID == 0 {
+			continue
+		}
+		window := min(spreadWindow, src.CheckInterval)
+		next := now.Add(time.Duration(rand.Int64N(int64(window))))
+		if err := s.store.Reschedule(ctx, src.ID, next); err != nil {
+			return err
+		}
+		n++
+	}
+	if n > 0 {
+		s.log.Info("spread overdue discovered sources", "count", n, "window", spreadWindow)
+	}
+	return nil
+}
+
+// retireOld disables discovered PDFs older than the retirement period.
+// Errors are logged, not returned: retirement can wait for the next hour.
+func (s *Scheduler) retireOld(ctx context.Context) {
+	n, err := s.store.RetireDiscovered(ctx, s.now().Add(-s.retire))
+	switch {
+	case err != nil && ctx.Err() == nil:
+		s.log.Error("retiring discovered sources", "err", err)
+	case n > 0:
+		s.log.Info("retired discovered sources", "count", n, "older_than", s.retire)
+	}
 }
 
 func (s *Scheduler) claim(id int64) bool {
@@ -200,7 +280,7 @@ func (s *Scheduler) CheckNow(ctx context.Context, id int64) (Event, error) {
 // source row (validators, schedule, failure count) and in the event log.
 func (s *Scheduler) check(ctx context.Context, src store.Source) Event {
 	start := s.now()
-	ev, v, err := s.pipeline(ctx, src)
+	ev, v, err := s.safePipeline(ctx, src)
 	ev.Time, ev.SourceID, ev.Label = start, src.ID, displayLabel(src)
 	ev.Duration = s.now().Sub(start)
 
@@ -222,8 +302,58 @@ func (s *Scheduler) check(ctx context.Context, src store.Source) Event {
 	if err := s.store.RecordCheck(ctx, src.ID, res); err != nil {
 		s.log.Error("recording check", "source", src.ID, "err", err)
 	}
+	if err != nil {
+		if reason := disableReason(src, err); reason != "" {
+			if derr := s.store.DisableSource(ctx, src.ID, reason); derr != nil {
+				s.log.Error("disabling source", "source", src.ID, "err", derr)
+			} else {
+				ev.Detail += fmt.Sprintf(" (disabled: %s)", reason)
+				s.log.Warn("source disabled", "source", src.ID, "url", src.URL, "reason", reason)
+			}
+		}
+	}
 	s.record(ev)
 	return ev
+}
+
+// safePipeline runs pipeline with a deadline and turns a panic into an
+// error. A bug triggered by one strange PDF must cost one failed check,
+// not the whole process (and with it every other source and the bot).
+//
+// Go note: recover only works in a deferred function, and only catches
+// panics in its own goroutine. The pipeline runs on this goroutine, so
+// this covers everything it does.
+func (s *Scheduler) safePipeline(ctx context.Context, src store.Source) (ev Event, v validators, err error) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("check panicked", "source", src.ID, "url", src.URL,
+				"panic", r, "stack", string(debug.Stack()))
+			ev, v, err = Event{}, validators{}, fmt.Errorf("internal error: %v", r)
+		}
+	}()
+	ev, v, err = s.pipeline(ctx, src)
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("check took longer than %v: %w", s.timeout, err)
+	}
+	return ev, v, err
+}
+
+// disableReason says whether a failure means the source should stop being
+// polled, and why. Everything else is retried with backoff.
+func disableReason(src store.Source, err error) store.DisabledReason {
+	if src.Kind == store.KindPDF && errors.Is(err, normalize.ErrNoText) {
+		// A scanned PDF stays scanned; retrying can't help (until OCR).
+		return store.DisabledNeedsOCR
+	}
+	var fe *fetcher.Error
+	// ConsecutiveFailures counts failures before this one.
+	if errors.As(err, &fe) && (fe.StatusCode == http.StatusNotFound || fe.StatusCode == http.StatusGone) &&
+		src.ConsecutiveFailures+1 >= goneAfter {
+		return store.DisabledGone
+	}
+	return ""
 }
 
 type validators struct{ etag, lastModified string }
