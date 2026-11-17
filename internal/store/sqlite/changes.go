@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/akkuraina/pehredaar/internal/store"
 )
@@ -120,19 +121,56 @@ func (s *Store) SaveSnapshot(ctx context.Context, snap store.Snapshot, change *s
 const changeColumns = `id, source_id, old_snapshot_id, new_snapshot_id, kind, diff,
 	importance, status, attempts, created_at`
 
+// changeRow holds the scan targets for changeColumns. Splitting "where to
+// scan into" (dest) from "build the value" (value) lets one row hold a
+// change and its source together (see FeedChanges).
+type changeRow struct {
+	c         store.Change
+	oldSnap   sql.NullInt64
+	createdAt sql.NullInt64
+}
+
+func (r *changeRow) dest() []any {
+	return []any{&r.c.ID, &r.c.SourceID, &r.oldSnap, &r.c.NewSnapshotID, &r.c.Kind, &r.c.Diff,
+		&r.c.Importance, &r.c.Status, &r.c.Attempts, &r.createdAt}
+}
+
+func (r *changeRow) value() store.Change {
+	r.c.OldSnapshotID = r.oldSnap.Int64
+	r.c.CreatedAt = fromMillis(r.createdAt)
+	return r.c
+}
+
 func scanChange(sc scanner) (store.Change, error) {
-	var (
-		c         store.Change
-		oldSnap   sql.NullInt64
-		createdAt sql.NullInt64
-	)
-	if err := sc.Scan(&c.ID, &c.SourceID, &oldSnap, &c.NewSnapshotID, &c.Kind, &c.Diff,
-		&c.Importance, &c.Status, &c.Attempts, &createdAt); err != nil {
+	var r changeRow
+	if err := sc.Scan(r.dest()...); err != nil {
 		return store.Change{}, err
 	}
-	c.OldSnapshotID = oldSnap.Int64
-	c.CreatedAt = fromMillis(createdAt)
-	return c, nil
+	return r.value(), nil
+}
+
+func scanFeedRow(sc scanner, e *store.FeedEntry) error {
+	var (
+		cr changeRow
+		sr sourceRow
+	)
+	dest := append(cr.dest(), sr.dest()...)
+	dest = append(dest, &e.Summary)
+	if err := sc.Scan(dest...); err != nil {
+		return err
+	}
+	e.Change, e.Source = cr.value(), sr.value()
+	return nil
+}
+
+// prefixed qualifies a column list with a table alias:
+// prefixed("s", "id, url") is "s.id, s.url".
+func prefixed(alias, columns string) string {
+	cols := strings.Split(columns, ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // queryChanges runs a SELECT of changeColumns and scans every row.
@@ -216,17 +254,91 @@ func (s *Store) Summary(ctx context.Context, changeID int64, lang store.Language
 	return text, err
 }
 
-func (s *Store) MarkDelivered(ctx context.Context, changeID, subscriberID int64) (bool, error) {
-	// The primary key on (change_id, subscriber_id) makes this race-free:
+func (s *Store) MarkDelivered(ctx context.Context, changeID, contactID int64) (bool, error) {
+	// The primary key on (change_id, contact_id) makes this race-free:
 	// if two goroutines try at once, exactly one insert wins.
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO deliveries (change_id, subscriber_id, sent_at)
+		INSERT INTO deliveries (change_id, contact_id, sent_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT DO NOTHING`,
-		changeID, subscriberID, toMillis(s.now()))
+		changeID, contactID, toMillis(s.now()))
 	if err != nil {
-		return false, fmt.Errorf("sqlite: mark change %d delivered to %d: %w", changeID, subscriberID, err)
+		return false, fmt.Errorf("sqlite: mark change %d delivered to contact %d: %w", changeID, contactID, err)
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+func (s *Store) FeedChanges(ctx context.Context, q store.FeedQuery) ([]store.FeedEntry, error) {
+	if q.Limit <= 0 {
+		q.Limit = 20
+	}
+	lang := q.Lang
+	if lang == "" {
+		lang = store.LangEnglish
+	}
+	where := []string{
+		`c.status NOT IN ('suppressed', 'failed')`,
+		`c.importance != 'cosmetic'`,
+		`c.id > ?`,
+	}
+	args := []any{lang, q.AfterID}
+	if q.BeforeID > 0 {
+		where = append(where, `c.id < ?`)
+		args = append(args, q.BeforeID)
+	}
+	if len(q.Categories) > 0 {
+		where = append(where, `src.category IN (?`+strings.Repeat(", ?", len(q.Categories)-1)+`)`)
+		for _, c := range q.Categories {
+			args = append(args, c)
+		}
+	}
+	args = append(args, q.Limit)
+
+	// The summary in the wanted language, else English, else none. Two
+	// LEFT JOINs and COALESCE do that in one query.
+	cols := prefixed("c", changeColumns)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+cols+`, `+prefixed("src", sourceColumns)+`,
+		       COALESCE(want.text, en.text, '')
+		FROM changes c
+		JOIN sources src ON src.id = c.source_id
+		LEFT JOIN change_summaries want ON want.change_id = c.id AND want.language = ?
+		LEFT JOIN change_summaries en   ON en.change_id = c.id AND en.language = 'en'
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY c.id DESC
+		LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: feed changes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []store.FeedEntry
+	for rows.Next() {
+		var e store.FeedEntry
+		if err := scanFeedRow(rows, &e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Stats(ctx context.Context) (store.Stats, error) {
+	var (
+		st        store.Stats
+		lastCheck sql.NullInt64
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM sources WHERE enabled = 1),
+			(SELECT COUNT(*) FROM sources WHERE enabled = 1 AND parent_id IS NULL),
+			(SELECT COUNT(*) FROM changes WHERE importance != 'cosmetic' AND status NOT IN ('suppressed', 'failed')),
+			(SELECT MAX(last_checked_at) FROM sources)`).
+		Scan(&st.Sources, &st.Feeds, &st.ChangesCaught, &lastCheck)
+	if err != nil {
+		return store.Stats{}, fmt.Errorf("sqlite: stats: %w", err)
+	}
+	st.LastCheckAt = fromMillis(lastCheck)
+	return st, nil
 }

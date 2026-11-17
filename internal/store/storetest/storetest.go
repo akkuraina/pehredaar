@@ -10,6 +10,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -44,7 +45,13 @@ func Run(t *testing.T, open Opener) {
 		{"Summaries", testSummaries},
 		{"Subscribers", testSubscribers},
 		{"Subscriptions", testSubscriptions},
-		{"SubscribersFor", testSubscribersFor},
+		{"EmailContacts", testEmailContacts},
+		{"LinkTelegramMerges", testLinkTelegramMerges},
+		{"Interests", testInterests},
+		{"Tokens", testTokens},
+		{"Setting", testSetting},
+		{"FeedChanges", testFeedChanges},
+		{"RecipientsFor", testRecipientsFor},
 		{"MarkDelivered", testMarkDelivered},
 		{"MarkDeliveredConcurrent", testMarkDeliveredConcurrent},
 	}
@@ -79,13 +86,23 @@ func mustSource(t *testing.T, s store.Store, url, category string) store.Source 
 	return src
 }
 
+// mustSubscriber registers a Telegram user (chat id = 10x the user id).
 func mustSubscriber(t *testing.T, s store.Store, telegramID int64) store.Subscriber {
 	t.Helper()
-	sub, err := s.UpsertSubscriber(ctx(t), telegramID, telegramID*10)
+	sub, err := s.TelegramSubscriber(ctx(t), telegramID, telegramID*10)
 	if err != nil {
-		t.Fatalf("UpsertSubscriber(%d): %v", telegramID, err)
+		t.Fatalf("TelegramSubscriber(%d): %v", telegramID, err)
 	}
 	return sub
+}
+
+func telegramContact(t *testing.T, s store.Store, telegramID int64) store.Contact {
+	t.Helper()
+	c, err := s.ContactByAddress(ctx(t), store.ChannelTelegram, fmt.Sprint(telegramID))
+	if err != nil {
+		t.Fatalf("telegram contact %d: %v", telegramID, err)
+	}
+	return c
 }
 
 func mustChange(t *testing.T, s store.Store, src store.Source) *store.Change {
@@ -99,10 +116,10 @@ func mustChange(t *testing.T, s store.Store, src store.Source) *store.Change {
 	return ch
 }
 
-func telegramIDs(subs []store.Subscriber) []int64 {
-	ids := make([]int64, len(subs))
-	for i, s := range subs {
-		ids[i] = s.TelegramID
+func contactIDs(rs []store.Recipient) []int64 {
+	ids := make([]int64, len(rs))
+	for i, r := range rs {
+		ids[i] = r.ID
 	}
 	return ids
 }
@@ -553,45 +570,260 @@ func testSummaries(t *testing.T, s store.Store) {
 
 func testSubscribers(t *testing.T, s store.Store) {
 	sub := mustSubscriber(t, s, 42)
-	if sub.Language != store.LangEnglish || !sub.Active || sub.ChatID != 420 {
-		t.Errorf("new subscriber = %+v", sub)
+	c := telegramContact(t, s, 42)
+	if sub.Language != store.LangEnglish || c.SubscriberID != sub.ID || !c.Active ||
+		c.ChatID != 420 || !c.Verified() || c.Channel != store.ChannelTelegram {
+		t.Errorf("new subscriber = %+v, contact = %+v", sub, c)
 	}
 
-	if err := s.SetLanguage(ctx(t), 42, store.LangHindi); err != nil {
+	if err := s.SetLanguage(ctx(t), sub.ID, store.LangHindi); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetActive(ctx(t), 42, false); err != nil {
+	if err := s.SetContactActive(ctx(t), c.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	// Coming back (e.g. /start after unblocking) reactivates and keeps language.
-	again, err := s.UpsertSubscriber(ctx(t), 42, 4200)
+	again, err := s.TelegramSubscriber(ctx(t), 42, 4200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.ID != sub.ID || !again.Active || again.ChatID != 4200 || again.Language != store.LangHindi {
-		t.Errorf("re-upserted subscriber = %+v", again)
+	c = telegramContact(t, s, 42)
+	if again.ID != sub.ID || !c.Active || c.ChatID != 4200 || again.Language != store.LangHindi {
+		t.Errorf("returning subscriber = %+v, contact = %+v", again, c)
 	}
 
-	if err := s.SetLanguage(ctx(t), 42, "fr"); err == nil {
+	if err := s.SetLanguage(ctx(t), sub.ID, "fr"); err == nil {
 		t.Error("SetLanguage accepted an unknown language")
 	}
-	if err := s.SetLanguage(ctx(t), 7, store.LangHindi); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("SetLanguage(unknown user) err = %v, want ErrNotFound", err)
+	if err := s.SetLanguage(ctx(t), 9999, store.LangHindi); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("SetLanguage(unknown) err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.Subscriber(ctx(t), 9999); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("Subscriber(unknown) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testEmailContacts(t *testing.T, s store.Store) {
+	web, err := s.CreateSubscriber(ctx(t), store.LangHindi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.AddEmail(ctx(t), web.ID, "  Asha@Example.TEST ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Address != "asha@example.test" || c.Verified() || !c.Active || c.SubscriberID != web.ID {
+		t.Errorf("new email contact = %+v", c)
+	}
+	// The same address again, even from someone else, returns the original.
+	other, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
+	dup, err := s.AddEmail(ctx(t), other.ID, "asha@example.test")
+	if err != nil || dup.ID != c.ID || dup.SubscriberID != web.ID {
+		t.Errorf("duplicate AddEmail = %+v, %v; want the existing contact", dup, err)
+	}
+	if _, err := s.AddEmail(ctx(t), web.ID, "not-an-address"); err == nil {
+		t.Error("AddEmail accepted a non-address")
+	}
+
+	if err := s.VerifyContact(ctx(t), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ContactByAddress(ctx(t), store.ChannelEmail, "ASHA@example.test")
+	if !got.Verified() {
+		t.Errorf("after verify = %+v", got)
+	}
+	all, err := s.Contacts(ctx(t), web.ID)
+	if err != nil || len(all) != 1 {
+		t.Errorf("Contacts = %+v, %v", all, err)
+	}
+	if _, err := s.ContactByAddress(ctx(t), store.ChannelEmail, "nobody@example.test"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("ContactByAddress(unknown) err = %v", err)
+	}
+}
+
+func testLinkTelegramMerges(t *testing.T, s store.Store) {
+	src := mustSource(t, s, "https://example.test/link", "ssc:results")
+	ch := mustChange(t, s, src)
+
+	// Someone used the bot first...
+	bot := mustSubscriber(t, s, 7)
+	tg := telegramContact(t, s, 7)
+	if err := s.Subscribe(ctx(t), bot.ID, store.Target{Category: "ssc:results"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInterests(ctx(t), bot.ID, []string{"upsc"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkDelivered(ctx(t), ch.ID, tg.ID); err != nil {
+		t.Fatal(err)
+	}
+	// ...then signed up on the web and linked Telegram.
+	web, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
+	if err := s.Subscribe(ctx(t), web.ID, store.Target{Category: "ssc:calendar"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInterests(ctx(t), web.ID, []string{"ibps", "upsc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.LinkTelegram(ctx(t), web.ID, 7, 77); err != nil {
+		t.Fatal(err)
+	}
+
+	tg = telegramContact(t, s, 7)
+	if tg.SubscriberID != web.ID || tg.ChatID != 77 {
+		t.Errorf("telegram contact after link = %+v", tg)
+	}
+	if _, err := s.Subscriber(ctx(t), bot.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("merged subscriber still exists: err = %v", err)
+	}
+	subs, _ := s.Subscriptions(ctx(t), web.ID)
+	if len(subs) != 2 {
+		t.Errorf("subscriptions after merge = %+v, want calendar + results", subs)
+	}
+	if got, _ := s.Interests(ctx(t), web.ID); len(got) != 2 || got[0] != "ibps" || got[1] != "upsc" {
+		t.Errorf("interests after merge = %v", got)
+	}
+	// The delivery moved with the contact: no repeat alert.
+	if again, _ := s.MarkDelivered(ctx(t), ch.ID, tg.ID); again {
+		t.Error("delivery record lost in the merge")
+	}
+
+	// Linking a brand-new Telegram account just adds it.
+	if err := s.LinkTelegram(ctx(t), web.ID, 8, 88); err != nil {
+		t.Fatal(err)
+	}
+	if c := telegramContact(t, s, 8); c.SubscriberID != web.ID || !c.Verified() {
+		t.Errorf("new linked contact = %+v", c)
+	}
+	// Linking again is harmless.
+	if err := s.LinkTelegram(ctx(t), web.ID, 8, 89); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testInterests(t *testing.T, s store.Store) {
+	sub, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
+	if err := s.SetInterests(ctx(t), sub.ID, []string{"upsc", "ssc", "upsc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInterests(ctx(t), sub.ID, []string{"ssc", "cat"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Interests(ctx(t), sub.ID)
+	if err != nil || len(got) != 2 || got[0] != "cat" || got[1] != "ssc" {
+		t.Errorf("Interests = %v, %v; want [cat ssc] (replaced, sorted)", got, err)
+	}
+}
+
+func testTokens(t *testing.T, s store.Store) {
+	sub, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
+	now := time.Now()
+	tok := store.Token{Hash: "h1", Purpose: store.TokenLogin, SubscriberID: sub.ID, ExpiresAt: now.Add(time.Hour)}
+	if err := s.CreateToken(ctx(t), tok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeToken(ctx(t), "h1", store.TokenVerifyEmail, now); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("wrong purpose: err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.ConsumeToken(ctx(t), "h1", store.TokenLogin, now.Add(2*time.Hour)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("expired: err = %v, want ErrNotFound", err)
+	}
+	got, err := s.ConsumeToken(ctx(t), "h1", store.TokenLogin, now)
+	if err != nil || got.SubscriberID != sub.ID {
+		t.Fatalf("ConsumeToken = %+v, %v", got, err)
+	}
+	if _, err := s.ConsumeToken(ctx(t), "h1", store.TokenLogin, now); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("second use: err = %v, want ErrNotFound", err)
+	}
+	if err := s.CreateToken(ctx(t), store.Token{Hash: "h2"}); err == nil {
+		t.Error("CreateToken accepted an incomplete token")
+	}
+}
+
+func testSetting(t *testing.T, s store.Store) {
+	v, err := s.Setting(ctx(t), "secret", "first")
+	if err != nil || v != "first" {
+		t.Fatalf("Setting = %q, %v", v, err)
+	}
+	if v, _ := s.Setting(ctx(t), "secret", "second"); v != "first" {
+		t.Errorf("Setting overwrote the stored value: %q", v)
+	}
+}
+
+func testFeedChanges(t *testing.T, s store.Store) {
+	a := mustSource(t, s, "https://example.test/fa", "ssc:results")
+	b := mustSource(t, s, "https://example.test/fb", "ssc:calendar")
+	c1 := mustChange(t, s, a)
+	c2 := mustChange(t, s, b)
+	c3 := mustChange(t, s, a)
+	cosmetic := mustChange(t, s, a)
+	cosmetic.Importance, cosmetic.Status = store.ImportanceCosmetic, store.StatusSuppressed
+	if err := s.UpdateChange(ctx(t), *cosmetic); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSummary(ctx(t), c1.ID, store.LangEnglish, "english"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSummary(ctx(t), c3.ID, store.LangHindi, "hindi"); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := func(es []store.FeedEntry) []int64 {
+		out := make([]int64, len(es))
+		for i, e := range es {
+			out[i] = e.Change.ID
+		}
+		return out
+	}
+	all, err := s.FeedChanges(ctx(t), store.FeedQuery{Lang: store.LangHindi})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []int64{c3.ID, c2.ID, c1.ID}; !equalInts(ids(all), want) {
+		t.Errorf("all = %v, want %v (newest first, cosmetic hidden)", ids(all), want)
+	}
+	if all[0].Summary != "hindi" || all[2].Summary != "english" || all[1].Summary != "" {
+		t.Errorf("summaries = %q %q %q; want hindi, none, English fallback",
+			all[0].Summary, all[1].Summary, all[2].Summary)
+	}
+	if all[1].Source.ID != b.ID || all[1].Source.Category != "ssc:calendar" {
+		t.Errorf("source not joined: %+v", all[1].Source)
+	}
+
+	onlyA, _ := s.FeedChanges(ctx(t), store.FeedQuery{Categories: []string{"ssc:results"}})
+	if want := []int64{c3.ID, c1.ID}; !equalInts(ids(onlyA), want) {
+		t.Errorf("category filter = %v, want %v", ids(onlyA), want)
+	}
+	after, _ := s.FeedChanges(ctx(t), store.FeedQuery{AfterID: c2.ID})
+	if want := []int64{c3.ID}; !equalInts(ids(after), want) {
+		t.Errorf("AfterID = %v, want %v", ids(after), want)
+	}
+	page, _ := s.FeedChanges(ctx(t), store.FeedQuery{BeforeID: c3.ID, Limit: 1})
+	if want := []int64{c2.ID}; !equalInts(ids(page), want) {
+		t.Errorf("BeforeID+Limit = %v, want %v", ids(page), want)
+	}
+
+	st, err := s.Stats(ctx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Feeds != 2 || st.Sources != 2 || st.ChangesCaught != 3 {
+		t.Errorf("stats = %+v", st)
 	}
 }
 
 func testSubscriptions(t *testing.T, s store.Store) {
 	src := mustSource(t, s, "https://example.test/subs", "ssc:results")
-	mustSubscriber(t, s, 1)
+	sub := mustSubscriber(t, s, 1)
 
 	cat := store.Target{Category: "ssc:results"}
 	one := store.Target{SourceID: src.ID}
 	for _, target := range []store.Target{cat, cat, one} { // cat twice: idempotent
-		if err := s.Subscribe(ctx(t), 1, target); err != nil {
+		if err := s.Subscribe(ctx(t), sub.ID, target); err != nil {
 			t.Fatalf("Subscribe(%+v): %v", target, err)
 		}
 	}
-	subs, err := s.Subscriptions(ctx(t), 1)
+	subs, err := s.Subscriptions(ctx(t), sub.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,31 +831,31 @@ func testSubscriptions(t *testing.T, s store.Store) {
 		t.Errorf("subscriptions = %+v", subs)
 	}
 
-	if err := s.Subscribe(ctx(t), 1, store.Target{SourceID: src.ID, Category: "x"}); err == nil {
+	if err := s.Subscribe(ctx(t), sub.ID, store.Target{SourceID: src.ID, Category: "x"}); err == nil {
 		t.Error("Subscribe accepted a target with both fields set")
 	}
-	if err := s.Subscribe(ctx(t), 1, store.Target{}); err == nil {
+	if err := s.Subscribe(ctx(t), sub.ID, store.Target{}); err == nil {
 		t.Error("Subscribe accepted an empty target")
 	}
-	if err := s.Subscribe(ctx(t), 99, cat); !errors.Is(err, store.ErrNotFound) {
+	if err := s.Subscribe(ctx(t), 9999, cat); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Subscribe(unknown user) err = %v, want ErrNotFound", err)
 	}
 
-	removed, err := s.Unsubscribe(ctx(t), 1, cat)
+	removed, err := s.Unsubscribe(ctx(t), sub.ID, cat)
 	if err != nil || !removed {
 		t.Errorf("Unsubscribe = %v, %v; want true, nil", removed, err)
 	}
-	removed, err = s.Unsubscribe(ctx(t), 1, cat)
+	removed, err = s.Unsubscribe(ctx(t), sub.ID, cat)
 	if err != nil || removed {
 		t.Errorf("second Unsubscribe = %v, %v; want false, nil", removed, err)
 	}
-	subs, _ = s.Subscriptions(ctx(t), 1)
+	subs, _ = s.Subscriptions(ctx(t), sub.ID)
 	if len(subs) != 1 || subs[0].Target != one {
 		t.Errorf("after unsubscribe = %+v", subs)
 	}
 }
 
-func testSubscribersFor(t *testing.T, s store.Store) {
+func testRecipientsFor(t *testing.T, s store.Store) {
 	feed := mustSource(t, s, "https://example.test/feed", "ssc:notice-board")
 	pdf, err := s.UpsertSource(ctx(t), store.Source{
 		URL: "https://example.test/notice.pdf", Kind: store.KindPDF, Category: "ssc:notice-board",
@@ -634,12 +866,15 @@ func testSubscribersFor(t *testing.T, s store.Store) {
 	}
 	other := mustSource(t, s, "https://example.test/other", "ssc:results")
 
+	subs := map[int64]store.Subscriber{}
+	tg := map[int64]int64{} // telegram id -> contact id
 	for _, id := range []int64{1, 2, 3, 4, 5} {
-		mustSubscriber(t, s, id)
+		subs[id] = mustSubscriber(t, s, id)
+		tg[id] = telegramContact(t, s, id).ID
 	}
 	subscribe := func(id int64, target store.Target) {
 		t.Helper()
-		if err := s.Subscribe(ctx(t), id, target); err != nil {
+		if err := s.Subscribe(ctx(t), subs[id].ID, target); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -649,7 +884,15 @@ func testSubscribersFor(t *testing.T, s store.Store) {
 	subscribe(3, store.Target{Category: "ssc:results"})
 	subscribe(4, store.Target{Category: "ssc:notice-board"})
 	subscribe(5, store.Target{SourceID: pdf.ID})
-	if err := s.SetActive(ctx(t), 4, false); err != nil { // blocked the bot
+	if err := s.SetContactActive(ctx(t), tg[4], false); err != nil { // blocked the bot
+		t.Fatal(err)
+	}
+	if err := s.SetLanguage(ctx(t), subs[2].ID, store.LangHindi); err != nil {
+		t.Fatal(err)
+	}
+	// Subscriber 1 also has email: unconfirmed first, so no alerts there.
+	email, err := s.AddEmail(ctx(t), subs[1].ID, "one@example.test")
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -657,17 +900,34 @@ func testSubscribersFor(t *testing.T, s store.Store) {
 		src  store.Source
 		want []int64
 	}{
-		{feed, []int64{1, 2}},
-		{pdf, []int64{1, 2, 5}},
-		{other, []int64{3}},
+		{feed, []int64{tg[1], tg[2]}},
+		{pdf, []int64{tg[1], tg[2], tg[5]}},
+		{other, []int64{tg[3]}},
 	}
 	for _, c := range cases {
-		subs, err := s.SubscribersFor(ctx(t), c.src)
+		rs, err := s.RecipientsFor(ctx(t), c.src)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := telegramIDs(subs); !equalInts(got, c.want) {
-			t.Errorf("SubscribersFor(%s) = %v, want %v", c.src.URL, got, c.want)
+		if got := contactIDs(rs); !equalInts(got, c.want) {
+			t.Errorf("RecipientsFor(%s) = %v, want %v", c.src.URL, got, c.want)
+		}
+	}
+
+	// Once confirmed, the email address is a second recipient for person 1.
+	if err := s.VerifyContact(ctx(t), email.ID); err != nil {
+		t.Fatal(err)
+	}
+	rs, _ := s.RecipientsFor(ctx(t), feed)
+	if want := []int64{tg[1], tg[2], email.ID}; !equalInts(contactIDs(rs), want) {
+		t.Errorf("with confirmed email = %v, want %v", contactIDs(rs), want)
+	}
+	for _, r := range rs {
+		if r.ID == tg[2] && r.Language != store.LangHindi {
+			t.Errorf("recipient language = %q, want the subscriber's (hi)", r.Language)
+		}
+		if r.ID == email.ID && (r.Channel != store.ChannelEmail || r.Address != "one@example.test") {
+			t.Errorf("email recipient = %+v", r)
 		}
 	}
 }
@@ -675,13 +935,14 @@ func testSubscribersFor(t *testing.T, s store.Store) {
 func testMarkDelivered(t *testing.T, s store.Store) {
 	src := mustSource(t, s, "https://example.test/deliv", "c")
 	ch := mustChange(t, s, src)
-	sub := mustSubscriber(t, s, 1)
+	mustSubscriber(t, s, 1)
+	c := telegramContact(t, s, 1)
 
-	first, err := s.MarkDelivered(ctx(t), ch.ID, sub.ID)
+	first, err := s.MarkDelivered(ctx(t), ch.ID, c.ID)
 	if err != nil || !first {
 		t.Fatalf("first MarkDelivered = %v, %v", first, err)
 	}
-	again, err := s.MarkDelivered(ctx(t), ch.ID, sub.ID)
+	again, err := s.MarkDelivered(ctx(t), ch.ID, c.ID)
 	if err != nil || again {
 		t.Errorf("second MarkDelivered = %v, %v; want false", again, err)
 	}
@@ -690,7 +951,8 @@ func testMarkDelivered(t *testing.T, s store.Store) {
 func testMarkDeliveredConcurrent(t *testing.T, s store.Store) {
 	src := mustSource(t, s, "https://example.test/race", "c")
 	ch := mustChange(t, s, src)
-	sub := mustSubscriber(t, s, 1)
+	mustSubscriber(t, s, 1)
+	sub := telegramContact(t, s, 1)
 
 	// Many goroutines race to deliver the same alert; exactly one may win.
 	const n = 20

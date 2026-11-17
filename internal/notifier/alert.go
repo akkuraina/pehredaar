@@ -5,23 +5,30 @@ package notifier
 
 import (
 	"errors"
+	"fmt"
 	"html"
 	"strings"
 
 	"github.com/akkuraina/pehredaar/internal/store"
 )
 
-// ErrBlocked means the user blocked the bot (or deleted their account):
-// Telegram will refuse every message to that chat, so the caller should
-// mark the subscriber inactive instead of retrying.
-var ErrBlocked = errors.New("notifier: user blocked the bot")
+// ErrUnreachable means a contact can never receive messages again as it
+// is (blocked the bot, address bounced, unsubscribed), so the caller should
+// deactivate the contact instead of retrying. Senders wrap it.
+var ErrUnreachable = errors.New("notifier: contact unreachable")
 
-// Alert is one message about one change.
+// ErrBlocked means the user blocked the bot (or deleted their account).
+// It wraps ErrUnreachable.
+var ErrBlocked = fmt.Errorf("%w: user blocked the bot", ErrUnreachable)
+
+// Alert is one message about one change. Every channel (Telegram, email)
+// renders the same Alert in its own format.
 type Alert struct {
-	Title string // category label, e.g. "SSC Notice Board"
-	Text  string // plain-text summary
-	Links []Link
-	Lang  store.Language // language of the fixed words ("Open PDF")
+	ChangeID int64  // for links back to the website
+	Title    string // category label, e.g. "SSC Notice Board"
+	Text     string // plain-text summary
+	Links    []Link
+	Lang     store.Language // language of the fixed words ("Open PDF")
 }
 
 // Link is a URL shown under an alert.

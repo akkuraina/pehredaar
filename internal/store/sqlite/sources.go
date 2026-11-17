@@ -15,25 +15,36 @@ const sourceColumns = `id, url, kind, category, language, label, parent_id,
 	check_interval_sec, enabled, etag, last_modified, last_checked_at,
 	next_check_at, consecutive_failures, last_error, created_at, disabled_reason`
 
+// sourceRow holds the scan targets for sourceColumns (see changeRow).
+type sourceRow struct {
+	s                                 store.Source
+	parentID                          sql.NullInt64
+	intervalSec                       int64
+	lastChecked, nextCheck, createdAt sql.NullInt64
+}
+
+func (r *sourceRow) dest() []any {
+	s := &r.s
+	return []any{&s.ID, &s.URL, &s.Kind, &s.Category, &s.Language, &s.Label, &r.parentID,
+		&r.intervalSec, &s.Enabled, &s.ETag, &s.LastModified, &r.lastChecked,
+		&r.nextCheck, &s.ConsecutiveFailures, &s.LastError, &r.createdAt, &s.DisabledReason}
+}
+
+func (r *sourceRow) value() store.Source {
+	r.s.ParentID = r.parentID.Int64
+	r.s.CheckInterval = time.Duration(r.intervalSec) * time.Second
+	r.s.LastCheckedAt = fromMillis(r.lastChecked)
+	r.s.NextCheckAt = fromMillis(r.nextCheck)
+	r.s.CreatedAt = fromMillis(r.createdAt)
+	return r.s
+}
+
 func scanSource(sc scanner) (store.Source, error) {
-	var (
-		s                                 store.Source
-		parentID                          sql.NullInt64
-		intervalSec                       int64
-		lastChecked, nextCheck, createdAt sql.NullInt64
-	)
-	err := sc.Scan(&s.ID, &s.URL, &s.Kind, &s.Category, &s.Language, &s.Label, &parentID,
-		&intervalSec, &s.Enabled, &s.ETag, &s.LastModified, &lastChecked,
-		&nextCheck, &s.ConsecutiveFailures, &s.LastError, &createdAt, &s.DisabledReason)
-	if err != nil {
+	var r sourceRow
+	if err := sc.Scan(r.dest()...); err != nil {
 		return store.Source{}, err
 	}
-	s.ParentID = parentID.Int64
-	s.CheckInterval = time.Duration(intervalSec) * time.Second
-	s.LastCheckedAt = fromMillis(lastChecked)
-	s.NextCheckAt = fromMillis(nextCheck)
-	s.CreatedAt = fromMillis(createdAt)
-	return s, nil
+	return r.value(), nil
 }
 
 func validateSource(s store.Source) error {

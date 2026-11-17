@@ -16,11 +16,11 @@ import (
 // consumer side) keeps the bot's dependencies visible; *sqlite.Store
 // satisfies it without saying so, because Go interfaces are implicit.
 type Store interface {
-	UpsertSubscriber(ctx context.Context, telegramID, chatID int64) (store.Subscriber, error)
-	SetLanguage(ctx context.Context, telegramID int64, lang store.Language) error
-	Subscribe(ctx context.Context, telegramID int64, t store.Target) error
-	Unsubscribe(ctx context.Context, telegramID int64, t store.Target) (bool, error)
-	Subscriptions(ctx context.Context, telegramID int64) ([]store.Subscription, error)
+	TelegramSubscriber(ctx context.Context, telegramID, chatID int64) (store.Subscriber, error)
+	SetLanguage(ctx context.Context, subscriberID int64, lang store.Language) error
+	Subscribe(ctx context.Context, subscriberID int64, t store.Target) error
+	Unsubscribe(ctx context.Context, subscriberID int64, t store.Target) (bool, error)
+	Subscriptions(ctx context.Context, subscriberID int64) ([]store.Subscription, error)
 }
 
 // commands is the bot's logic, separate from the Telegram transport: each
@@ -67,7 +67,7 @@ const (
 // blocked the bot and came back) and returns their settings. Every command
 // starts with it, so no command can fail with "unknown subscriber".
 func (c *commands) register(ctx context.Context, u user) (store.Subscriber, error) {
-	return c.store.UpsertSubscriber(ctx, u.telegramID, u.chatID)
+	return c.store.TelegramSubscriber(ctx, u.telegramID, u.chatID)
 }
 
 func (c *commands) start(ctx context.Context, u user) (reply, error) {
@@ -101,12 +101,12 @@ func (c *commands) watch(ctx context.Context, u user) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return c.watchView(ctx, u, textsFor(sub.Language))
+	return c.watchView(ctx, sub.ID, textsFor(sub.Language))
 }
 
 // watchView lists every category; the ones already watched are ticked.
-func (c *commands) watchView(ctx context.Context, u user, t texts) (reply, error) {
-	watched, err := c.watched(ctx, u)
+func (c *commands) watchView(ctx context.Context, subID int64, t texts) (reply, error) {
+	watched, err := c.watched(ctx, subID)
 	if err != nil {
 		return reply{}, err
 	}
@@ -129,7 +129,7 @@ func (c *commands) list(ctx context.Context, u user) (reply, error) {
 		return reply{}, err
 	}
 	t := textsFor(sub.Language)
-	ids, err := c.watchedList(ctx, u)
+	ids, err := c.watchedList(ctx, sub.ID)
 	if err != nil {
 		return reply{}, err
 	}
@@ -152,16 +152,16 @@ func (c *commands) stop(ctx context.Context, u user, args string) (reply, error)
 	}
 	t := textsFor(sub.Language)
 	if strings.EqualFold(strings.TrimSpace(args), "all") {
-		if err := c.unsubscribeAll(ctx, u); err != nil {
+		if err := c.unsubscribeAll(ctx, sub.ID); err != nil {
 			return reply{}, err
 		}
 		return reply{text: t.stoppedAll}, nil
 	}
-	return c.stopView(ctx, u, t)
+	return c.stopView(ctx, sub.ID, t)
 }
 
-func (c *commands) stopView(ctx context.Context, u user, t texts) (reply, error) {
-	ids, err := c.watchedList(ctx, u)
+func (c *commands) stopView(ctx context.Context, subID int64, t texts) (reply, error) {
+	ids, err := c.watchedList(ctx, subID)
 	if err != nil {
 		return reply{}, err
 	}
@@ -186,7 +186,7 @@ func (c *commands) callback(ctx context.Context, u user, data string) (reply, er
 		if lang != store.LangEnglish && lang != store.LangHindi {
 			return reply{}, fmt.Errorf("unknown language %q", lang)
 		}
-		if err := c.store.SetLanguage(ctx, u.telegramID, lang); err != nil {
+		if err := c.store.SetLanguage(ctx, sub.ID, lang); err != nil {
 			return reply{}, err
 		}
 		return reply{text: textsFor(lang).languageSet}, nil
@@ -196,50 +196,50 @@ func (c *commands) callback(ctx context.Context, u user, data string) (reply, er
 		if _, ok := c.labels[id]; !ok {
 			// A button from an old message for a category since removed
 			// from sources.yaml.
-			r, err := c.watchView(ctx, u, t)
+			r, err := c.watchView(ctx, sub.ID, t)
 			r.toast = t.unknownFeed
 			return r, err
 		}
-		watched, err := c.watched(ctx, u)
+		watched, err := c.watched(ctx, sub.ID)
 		if err != nil {
 			return reply{}, err
 		}
 		toast := fmt.Sprintf(t.alreadyWatched, c.label(id))
 		if !watched[id] {
-			if err := c.store.Subscribe(ctx, u.telegramID, store.Target{Category: id}); err != nil {
+			if err := c.store.Subscribe(ctx, sub.ID, store.Target{Category: id}); err != nil {
 				return reply{}, err
 			}
 			toast = fmt.Sprintf(t.watching, c.label(id))
 		}
-		r, err := c.watchView(ctx, u, t)
+		r, err := c.watchView(ctx, sub.ID, t)
 		r.toast = toast
 		return r, err
 
 	case data == cbUnsub+unsubAll:
-		if err := c.unsubscribeAll(ctx, u); err != nil {
+		if err := c.unsubscribeAll(ctx, sub.ID); err != nil {
 			return reply{}, err
 		}
 		return reply{text: t.stoppedAll}, nil
 
 	case strings.HasPrefix(data, cbUnsub):
 		id := strings.TrimPrefix(data, cbUnsub)
-		if _, err := c.store.Unsubscribe(ctx, u.telegramID, store.Target{Category: id}); err != nil {
+		if _, err := c.store.Unsubscribe(ctx, sub.ID, store.Target{Category: id}); err != nil {
 			return reply{}, err
 		}
-		r, err := c.stopView(ctx, u, t)
+		r, err := c.stopView(ctx, sub.ID, t)
 		r.toast = fmt.Sprintf(t.stopped, c.label(id))
 		return r, err
 	}
 	return reply{}, fmt.Errorf("unknown callback data %q", data)
 }
 
-func (c *commands) unsubscribeAll(ctx context.Context, u user) error {
-	subs, err := c.store.Subscriptions(ctx, u.telegramID)
+func (c *commands) unsubscribeAll(ctx context.Context, subID int64) error {
+	subs, err := c.store.Subscriptions(ctx, subID)
 	if err != nil {
 		return err
 	}
 	for _, s := range subs {
-		if _, err := c.store.Unsubscribe(ctx, u.telegramID, s.Target); err != nil {
+		if _, err := c.store.Unsubscribe(ctx, subID, s.Target); err != nil {
 			return err
 		}
 	}
@@ -248,8 +248,8 @@ func (c *commands) unsubscribeAll(ctx context.Context, u user) error {
 
 // watchedList returns the user's category subscriptions in subscription
 // order. v1 only creates category subscriptions; others are ignored here.
-func (c *commands) watchedList(ctx context.Context, u user) ([]string, error) {
-	subs, err := c.store.Subscriptions(ctx, u.telegramID)
+func (c *commands) watchedList(ctx context.Context, subID int64) ([]string, error) {
+	subs, err := c.store.Subscriptions(ctx, subID)
 	if err != nil {
 		return nil, err
 	}
@@ -262,8 +262,8 @@ func (c *commands) watchedList(ctx context.Context, u user) ([]string, error) {
 	return ids, nil
 }
 
-func (c *commands) watched(ctx context.Context, u user) (map[string]bool, error) {
-	ids, err := c.watchedList(ctx, u)
+func (c *commands) watched(ctx context.Context, subID int64) (map[string]bool, error) {
+	ids, err := c.watchedList(ctx, subID)
 	if err != nil {
 		return nil, err
 	}

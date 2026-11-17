@@ -4,9 +4,11 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -109,20 +111,76 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("sqlite: read migration %q: %w", e.Name(), err)
 		}
-		err = s.inTx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx,
-				`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
-				version, toMillis(s.now()))
-			return err
-		})
+		if bytes.Contains(body, []byte(noForeignKeysMarker)) {
+			err = s.migrateWithoutForeignKeys(ctx, version, string(body))
+		} else {
+			err = s.inTx(ctx, func(tx *sql.Tx) error {
+				return s.applyMigration(ctx, tx, version, string(body))
+			})
+		}
 		if err != nil {
 			return fmt.Errorf("sqlite: apply migration %q: %w", e.Name(), err)
 		}
 	}
 	return nil
+}
+
+// noForeignKeysMarker, in a migration file, makes it run with foreign key
+// enforcement off. SQLite can't drop a UNIQUE column or change NOT NULL in
+// place; the documented way is to rebuild the table (create new, copy,
+// drop old, rename). With foreign keys on, dropping the old table would
+// cascade-delete every row that references it.
+const noForeignKeysMarker = "-- pehredaar:foreign-keys-off"
+
+func (s *Store) applyMigration(ctx context.Context, tx *sql.Tx, version int, body string) error {
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+		version, toMillis(s.now()))
+	return err
+}
+
+// migrateWithoutForeignKeys follows SQLite's table-rebuild procedure
+// (sqlite.org/lang_altertable.html#otheralter): foreign keys off, then a
+// transaction that ends with foreign_key_check, so a rebuild that leaves a
+// dangling reference is rolled back instead of committed.
+//
+// Go note: PRAGMA foreign_keys is per connection and is ignored inside a
+// transaction, and *sql.DB is a pool. db.Conn pins one connection so the
+// pragma, the transaction and the reset all happen on the same one.
+func (s *Store) migrateWithoutForeignKeys(ctx context.Context, version int, body string) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	// Restore enforcement before the connection goes back to the pool.
+	// context.WithoutCancel: this must run even if ctx was cancelled.
+	defer conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`)
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.applyMigration(ctx, tx, version, body); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	bad := rows.Next()
+	rows.Close()
+	if bad {
+		return errors.New("foreign key check failed after rebuild")
+	}
+	return tx.Commit()
 }
 
 // inTx runs fn inside a transaction, committing if fn returns nil and

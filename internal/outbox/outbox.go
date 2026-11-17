@@ -26,9 +26,12 @@ import (
 	"github.com/akkuraina/pehredaar/internal/summarizer"
 )
 
-// Notifier sends one alert to one chat. *notifier.Bot implements it.
-type Notifier interface {
-	Send(ctx context.Context, chatID int64, a notifier.Alert) error
+// Sender delivers one alert to one contact on its channel. *notifier.Bot
+// (Telegram) and *email.Sender implement it. A sender returns an error
+// wrapping notifier.ErrUnreachable when the contact can never be reached
+// again, and the processor deactivates it.
+type Sender interface {
+	Deliver(ctx context.Context, to store.Recipient, a notifier.Alert) error
 }
 
 // Config holds the processor's dependencies.
@@ -38,8 +41,10 @@ type Config struct {
 	// Fallback is used once Summarizer has failed MaxAttempts times for a
 	// change; default summarizer.Template{}. A late templated alert beats
 	// a missed date change.
-	Fallback   summarizer.Summarizer
-	Notifier   Notifier
+	Fallback summarizer.Summarizer
+	// Senders by channel. A channel without a sender is skipped, so alerts
+	// still flow on the others (say, email without a Resend key).
+	Senders    map[store.Channel]Sender
 	Categories []config.Category // alert titles
 	Poll       time.Duration     // how often to look for work; default 15s
 	Logger     *slog.Logger
@@ -50,7 +55,7 @@ type Processor struct {
 	store    store.Store
 	sum      summarizer.Summarizer
 	fallback summarizer.Summarizer
-	notify   Notifier
+	senders  map[store.Channel]Sender
 	titles   map[string]string // category → label
 	poll     time.Duration
 	log      *slog.Logger
@@ -77,7 +82,7 @@ func New(cfg Config) *Processor {
 		store:    cfg.Store,
 		sum:      cfg.Summarizer,
 		fallback: cfg.Fallback,
-		notify:   cfg.Notifier,
+		senders:  cfg.Senders,
 		titles:   make(map[string]string, len(cfg.Categories)),
 		poll:     cfg.Poll,
 		log:      cfg.Logger,
@@ -145,21 +150,18 @@ func (p *Processor) process(ctx context.Context, ch store.Change) error {
 	if err != nil {
 		return err
 	}
-	all, err := p.store.SubscribersFor(ctx, src)
+	all, err := p.store.RecipientsFor(ctx, src)
 	if err != nil {
 		return err
 	}
-	subs := route(all, src)
-	if len(subs) == 0 {
-		// Nobody to tell. Skip the summarizer (an LLM call costs money) and
-		// close it; people who subscribe later don't get a backlog.
-		return p.finish(ctx, ch, store.StatusNotified)
-	}
+	recips := route(all, src)
 
-	// One summary per language actually needed, cached in the store so a
-	// retry after a crash doesn't pay for the LLM twice.
+	// One summary per language needed, cached in the store so a retry
+	// after a crash doesn't pay for the LLM twice. English is always made,
+	// even with nobody to alert: the website's feed shows every change,
+	// and the summary is also where "cosmetic" gets decided.
 	texts := make(map[store.Language]string)
-	for _, lang := range languages(subs) {
+	for _, lang := range languages(recips) {
 		text, err := p.summary(ctx, &ch, src, lang)
 		if err != nil {
 			return err
@@ -186,35 +188,39 @@ func (p *Processor) process(ctx context.Context, ch store.Change) error {
 	}
 	links := alertLinks(src, ch.Diff)
 	sent := 0
-	for _, sub := range subs {
+	for _, r := range recips {
+		send := p.senders[r.Channel]
+		if send == nil {
+			continue // channel not configured (e.g. no RESEND_API_KEY)
+		}
 		// Mark, then send: if the process dies between the two, this
-		// subscriber misses the alert, but nobody ever gets it twice.
-		first, err := p.store.MarkDelivered(ctx, ch.ID, sub.ID)
+		// contact misses the alert, but nobody ever gets it twice.
+		first, err := p.store.MarkDelivered(ctx, ch.ID, r.ID)
 		if err != nil {
 			return err
 		}
 		if !first {
 			continue // sent before a restart
 		}
-		err = p.notify.Send(ctx, sub.ChatID, notifier.Alert{
-			Title: title, Text: texts[sub.Language], Links: links, Lang: sub.Language,
+		err = send.Deliver(ctx, r, notifier.Alert{
+			ChangeID: ch.ID, Title: title, Text: texts[r.Language], Links: links, Lang: r.Language,
 		})
 		switch {
 		case err == nil:
 			sent++
-		case errors.Is(err, notifier.ErrBlocked):
-			p.log.Info("outbox: subscriber blocked the bot, deactivating", "subscriber", sub.ID)
-			if err := p.store.SetActive(ctx, sub.TelegramID, false); err != nil {
-				p.log.Error("outbox: deactivating subscriber", "subscriber", sub.ID, "err", err)
+		case errors.Is(err, notifier.ErrUnreachable):
+			p.log.Info("outbox: contact unreachable, deactivating", "contact", r.ID, "channel", r.Channel, "err", err)
+			if err := p.store.SetContactActive(ctx, r.ID, false); err != nil {
+				p.log.Error("outbox: deactivating contact", "contact", r.ID, "err", err)
 			}
 		case ctx.Err() != nil:
 			return ctx.Err() // shutting down; the rest are sent after restart
 		default:
-			p.log.Error("outbox: alert lost", "change", ch.ID, "subscriber", sub.ID, "err", err)
+			p.log.Error("outbox: alert lost", "change", ch.ID, "contact", r.ID, "channel", r.Channel, "err", err)
 		}
 	}
-	p.log.Info("outbox: alert sent", "change", ch.ID, "source", src.ID, "title", title,
-		"subscribers", len(subs), "delivered", sent)
+	p.log.Info("outbox: change done", "change", ch.ID, "source", src.ID, "title", title,
+		"recipients", len(recips), "delivered", sent)
 	return p.finish(ctx, ch, store.StatusNotified)
 }
 
@@ -264,22 +270,21 @@ func (p *Processor) finish(ctx context.Context, ch store.Change, status store.Ch
 // route applies the language table in docs/ARCHITECTURE.md §5: English
 // subscribers don't get alerts from Hindi sources (the Hindi feeds lag the
 // English ones and mostly repeat them); Hindi subscribers get both.
-func route(subs []store.Subscriber, src store.Source) []store.Subscriber {
+func route(rs []store.Recipient, src store.Source) []store.Recipient {
 	if src.Language != store.LangHindi {
-		return subs
+		return rs
 	}
-	return slices.DeleteFunc(slices.Clone(subs), func(s store.Subscriber) bool {
-		return s.Language != store.LangHindi
+	return slices.DeleteFunc(slices.Clone(rs), func(r store.Recipient) bool {
+		return r.Language != store.LangHindi
 	})
 }
 
-// languages lists the distinct languages of subs, English first.
-func languages(subs []store.Subscriber) []store.Language {
-	var out []store.Language
-	for _, l := range []store.Language{store.LangEnglish, store.LangHindi} {
-		if slices.ContainsFunc(subs, func(s store.Subscriber) bool { return s.Language == l }) {
-			out = append(out, l)
-		}
+// languages lists the summary languages needed: always English (the
+// website shows it), then Hindi if any recipient reads Hindi.
+func languages(rs []store.Recipient) []store.Language {
+	out := []store.Language{store.LangEnglish}
+	if slices.ContainsFunc(rs, func(r store.Recipient) bool { return r.Language == store.LangHindi }) {
+		out = append(out, store.LangHindi)
 	}
 	return out
 }

@@ -72,7 +72,7 @@ func TestStartRegistersAndOffersLanguages(t *testing.T) {
 	if got := strings.Join(buttons(r.kb), ","); got != "English=lang:en,हिन्दी=lang:hi" {
 		t.Errorf("buttons = %s", got)
 	}
-	if _, err := st.Subscriptions(t.Context(), alice.telegramID); err != nil {
+	if _, err := st.Subscriptions(t.Context(), subOf(t, st, alice)); err != nil {
 		t.Errorf("subscriber not usable after /start: %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestWatchListStop(t *testing.T) {
 	}
 	ok(t)(c.callback(ctx, alice, "sub:ssc:notice-board"))
 
-	subs, err := st.Subscriptions(ctx, alice.telegramID)
+	subs, err := st.Subscriptions(ctx, subOf(t, st, alice))
 	if err != nil || len(subs) != 2 {
 		t.Fatalf("subscriptions = %v, %v", subs, err)
 	}
@@ -143,7 +143,7 @@ func TestWatchListStop(t *testing.T) {
 	if r.text != textsEN.stoppedAll {
 		t.Errorf("/stop all = %q", r.text)
 	}
-	if subs, _ := st.Subscriptions(ctx, alice.telegramID); len(subs) != 0 {
+	if subs, _ := st.Subscriptions(ctx, subOf(t, st, alice)); len(subs) != 0 {
 		t.Errorf("subscriptions left after /stop all: %v", subs)
 	}
 }
@@ -154,7 +154,7 @@ func TestStaleCategoryButton(t *testing.T) {
 	if r.toast != textsEN.unknownFeed {
 		t.Errorf("toast = %q", r.toast)
 	}
-	if subs, _ := st.Subscriptions(t.Context(), alice.telegramID); len(subs) != 0 {
+	if subs, _ := st.Subscriptions(t.Context(), subOf(t, st, alice)); len(subs) != 0 {
 		t.Errorf("subscribed to a removed category: %v", subs)
 	}
 }
@@ -263,4 +263,14 @@ func TestSendBadRequestNotRetried(t *testing.T) {
 	if err := b.Send(t.Context(), 42, Alert{}); err == nil || f.calls != 1 {
 		t.Errorf("err=%v calls=%d", err, f.calls)
 	}
+}
+
+// subOf returns the subscriber ID behind a Telegram user.
+func subOf(t *testing.T, st *sqlite.Store, u user) int64 {
+	t.Helper()
+	sub, err := st.TelegramSubscriber(t.Context(), u.telegramID, u.chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sub.ID
 }

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/akkuraina/pehredaar/internal/config"
+	"github.com/akkuraina/pehredaar/internal/store"
 )
 
 // api is the part of *bot.Bot used for sending, so tests can fake it.
@@ -210,6 +211,12 @@ const maxSendAttempts = 4
 
 // maxRetryAfter caps how long one message waits on Telegram's flood control.
 const maxRetryAfter = time.Minute
+
+// Deliver sends an alert to a Telegram contact. It is how the outbox
+// reaches Telegram; see Send.
+func (b *Bot) Deliver(ctx context.Context, to store.Recipient, a Alert) error {
+	return b.Send(ctx, to.ChatID, a)
+}
 
 // Send delivers an alert to a chat, waiting for the rate limits and
 // retrying on flood control and network errors. It returns ErrBlocked if

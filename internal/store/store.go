@@ -143,14 +143,89 @@ type Change struct {
 	CreatedAt     time.Time
 }
 
-// Subscriber is a Telegram user who has talked to the bot.
+// Subscriber is a person. They are reached through one or more Contacts
+// and their subscriptions apply to all of them.
 type Subscriber struct {
-	ID         int64
-	TelegramID int64
-	ChatID     int64
-	Language   Language // alert language
-	Active     bool     // false once the user blocks the bot
-	CreatedAt  time.Time
+	ID        int64
+	Language  Language // alert and site language
+	CreatedAt time.Time
+}
+
+// Channel is a way of reaching a subscriber.
+type Channel string
+
+const (
+	ChannelTelegram Channel = "telegram"
+	ChannelEmail    Channel = "email"
+)
+
+// Contact is one way to reach a subscriber: a Telegram account or an email
+// address. Alerts go to every contact that is both verified and active.
+type Contact struct {
+	ID           int64
+	SubscriberID int64
+	Channel      Channel
+	// Address is the Telegram user id (as text) or the lower-cased email.
+	Address    string
+	ChatID     int64     // Telegram only
+	VerifiedAt time.Time // zero until an email address is confirmed
+	// Active is false after the user blocked the bot, unsubscribed, or
+	// the address bounced.
+	Active    bool
+	CreatedAt time.Time
+}
+
+// Verified reports whether the contact has been confirmed.
+func (c Contact) Verified() bool { return !c.VerifiedAt.IsZero() }
+
+// Recipient is a contact that should get an alert, with the language of
+// the person behind it.
+type Recipient struct {
+	Contact
+	Language Language
+}
+
+// TokenPurpose is what a one-time token is for.
+type TokenPurpose string
+
+const (
+	TokenVerifyEmail  TokenPurpose = "verify-email"  // confirm an address, then sign in
+	TokenLogin        TokenPurpose = "login"         // sign in from an emailed or Telegram link
+	TokenLinkTelegram TokenPurpose = "link-telegram" // attach a Telegram account (bot deep link)
+)
+
+// Token is a one-time token. The store only ever sees its hash.
+type Token struct {
+	Hash         string
+	Purpose      TokenPurpose
+	SubscriberID int64
+	ContactID    int64 // the contact being verified, if any
+	ExpiresAt    time.Time
+}
+
+// FeedQuery selects changes for the website feed. Cosmetic, suppressed
+// and failed changes are never included.
+type FeedQuery struct {
+	Categories []string // empty: all categories
+	AfterID    int64    // only changes with a larger id (live updates)
+	BeforeID   int64    // only changes with a smaller id (paging); 0: no limit
+	Lang       Language // summary language; falls back to English
+	Limit      int
+}
+
+// FeedEntry is one change as the website shows it.
+type FeedEntry struct {
+	Change  Change
+	Source  Source
+	Summary string // empty while the change is still pending
+}
+
+// Stats are the public numbers shown on the landing page.
+type Stats struct {
+	Sources       int       // enabled sources, feeds and PDFs
+	Feeds         int       // enabled curated sources
+	ChangesCaught int       // changes that weren't cosmetic
+	LastCheckAt   time.Time // most recent check of any source
 }
 
 // Target is what a subscription points at: exactly one of a single source
@@ -240,30 +315,68 @@ type Store interface {
 	// Summary returns ErrNotFound if no summary exists for that language yet.
 	Summary(ctx context.Context, changeID int64, lang Language) (string, error)
 
-	// Subscribers and subscriptions.
+	// FeedChanges returns changes for the website, newest first.
+	FeedChanges(ctx context.Context, q FeedQuery) ([]FeedEntry, error)
+	Stats(ctx context.Context) (Stats, error)
 
-	// UpsertSubscriber registers a Telegram user, or reactivates and updates
-	// the chat ID of an existing one.
-	UpsertSubscriber(ctx context.Context, telegramID, chatID int64) (Subscriber, error)
-	SetLanguage(ctx context.Context, telegramID int64, lang Language) error
-	SetActive(ctx context.Context, telegramID int64, active bool) error
+	// Subscribers and contacts.
+
+	// CreateSubscriber adds a person with no contacts yet (web sign-up).
+	CreateSubscriber(ctx context.Context, lang Language) (Subscriber, error)
+	Subscriber(ctx context.Context, id int64) (Subscriber, error)
+	// TelegramSubscriber returns the subscriber behind a Telegram account,
+	// creating both if it is new. It reactivates the contact and updates
+	// its chat ID, since talking to the bot undoes a block.
+	TelegramSubscriber(ctx context.Context, telegramID, chatID int64) (Subscriber, error)
+	// LinkTelegram attaches a Telegram account to subscriberID. If that
+	// account already belonged to another subscriber (they used the bot
+	// before signing up on the web), that subscriber is merged into this
+	// one: contacts, subscriptions and interests move over.
+	LinkTelegram(ctx context.Context, subscriberID, telegramID, chatID int64) error
+	// AddEmail adds an unverified email contact. If the address is already
+	// known it returns the existing contact, whoever it belongs to.
+	AddEmail(ctx context.Context, subscriberID int64, email string) (Contact, error)
+	Contact(ctx context.Context, id int64) (Contact, error)
+	// ContactByAddress returns ErrNotFound if nobody has that address.
+	ContactByAddress(ctx context.Context, ch Channel, address string) (Contact, error)
+	Contacts(ctx context.Context, subscriberID int64) ([]Contact, error)
+	VerifyContact(ctx context.Context, contactID int64) error
+	SetContactActive(ctx context.Context, contactID int64, active bool) error
+	SetLanguage(ctx context.Context, subscriberID int64, lang Language) error
+
+	// Subscriptions and interests.
+
 	// Subscribe is idempotent: subscribing twice to the same target is not an
 	// error. It returns ErrNotFound if the subscriber does not exist.
-	Subscribe(ctx context.Context, telegramID int64, t Target) error
+	Subscribe(ctx context.Context, subscriberID int64, t Target) error
 	// Unsubscribe reports whether a subscription was actually removed.
-	Unsubscribe(ctx context.Context, telegramID int64, t Target) (bool, error)
-	Subscriptions(ctx context.Context, telegramID int64) ([]Subscription, error)
-	// SubscribersFor returns active subscribers whose subscriptions cover src:
-	// its category, the source itself, or (for discovered PDFs) its parent.
-	// Language routing is the caller's job; the store does not filter on it.
-	SubscribersFor(ctx context.Context, src Source) ([]Subscriber, error)
+	Unsubscribe(ctx context.Context, subscriberID int64, t Target) (bool, error)
+	Subscriptions(ctx context.Context, subscriberID int64) ([]Subscription, error)
+	// SetInterests replaces the exams a subscriber wants watched.
+	SetInterests(ctx context.Context, subscriberID int64, exams []string) error
+	Interests(ctx context.Context, subscriberID int64) ([]string, error)
+	// RecipientsFor returns the verified, active contacts of subscribers
+	// whose subscriptions cover src: its category, the source itself, or
+	// (for discovered PDFs) its parent. Language routing is the caller's job.
+	RecipientsFor(ctx context.Context, src Source) ([]Recipient, error)
+
+	// Tokens and settings.
+
+	CreateToken(ctx context.Context, t Token) error
+	// ConsumeToken marks an unexpired, unused token as used and returns it.
+	// It returns ErrNotFound for unknown, expired, used or wrong-purpose
+	// tokens, without saying which: the caller shouldn't either.
+	ConsumeToken(ctx context.Context, hash string, purpose TokenPurpose, now time.Time) (Token, error)
+	// Setting returns a stored value, storing init first if the key is new.
+	// Concurrent callers all get the same value.
+	Setting(ctx context.Context, key, init string) (string, error)
 
 	// Deliveries.
 
-	// MarkDelivered records that a change was sent to a subscriber. It
+	// MarkDelivered records that a change was sent to a contact. It
 	// returns false if it had already been recorded, so callers send only
 	// when it returns true.
-	MarkDelivered(ctx context.Context, changeID, subscriberID int64) (bool, error)
+	MarkDelivered(ctx context.Context, changeID, contactID int64) (bool, error)
 
 	Close() error
 }

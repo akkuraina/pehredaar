@@ -35,7 +35,8 @@ type fakeNotifier struct {
 	blocked map[int64]bool
 }
 
-func (f *fakeNotifier) Send(_ context.Context, chatID int64, a notifier.Alert) error {
+func (f *fakeNotifier) Deliver(_ context.Context, to store.Recipient, a notifier.Alert) error {
+	chatID := to.ChatID
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.blocked[chatID] {
@@ -78,7 +79,7 @@ func newEnv(t *testing.T, sum summarizer.Summarizer) *env {
 	p := New(Config{
 		Store:      st,
 		Summarizer: sum,
-		Notifier:   n,
+		Senders:    map[store.Channel]Sender{store.ChannelTelegram: n},
 		Categories: []config.Category{{ID: "ssc:notice-board", Label: "SSC Notice Board"}},
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -117,14 +118,14 @@ func (e *env) change(src store.Source, kind store.ChangeKind, diff string) store
 func (e *env) subscriber(tgID int64, lang store.Language) store.Subscriber {
 	e.t.Helper()
 	ctx := e.t.Context()
-	s, err := e.st.UpsertSubscriber(ctx, tgID, tgID)
+	s, err := e.st.TelegramSubscriber(ctx, tgID, tgID)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.st.SetLanguage(ctx, tgID, lang); err != nil {
+	if err := e.st.SetLanguage(ctx, s.ID, lang); err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.st.Subscribe(ctx, tgID, store.Target{Category: "ssc:notice-board"}); err != nil {
+	if err := e.st.Subscribe(ctx, s.ID, store.Target{Category: "ssc:notice-board"}); err != nil {
 		e.t.Fatal(err)
 	}
 	return s
@@ -195,15 +196,20 @@ func TestHindiSourceOnlyAlertsHindiSubscribers(t *testing.T) {
 	}
 }
 
-func TestNoSubscribersClosesWithoutSummarizing(t *testing.T) {
-	sum := &failingSummarizer{}
+// With nobody to alert, a change is still summarized once, in English,
+// because the website's feed shows every change.
+func TestNoSubscribersStillSummarizesForTheWebsite(t *testing.T) {
+	sum := &failingSummarizer{s: summarizer.Summary{Text: "for the site", Importance: store.ImportanceDate}}
 	e := newEnv(t, sum)
 	src := e.source(feedURL, store.KindFeed, store.LangEnglish)
 	ch := e.change(src, store.ChangeAdded, addedDiff)
 
 	e.run()
-	if c := e.status(ch.ID); c.Status != store.StatusNotified || sum.calls != 0 {
-		t.Errorf("status=%s summarizer calls=%d; want notified, 0", c.Status, sum.calls)
+	if c := e.status(ch.ID); c.Status != store.StatusNotified || sum.calls != 1 {
+		t.Errorf("status=%s summarizer calls=%d; want notified, 1", c.Status, sum.calls)
+	}
+	if text, err := e.st.Summary(t.Context(), ch.ID, store.LangEnglish); err != nil || text != "for the site" {
+		t.Errorf("English summary = %q, %v", text, err)
 	}
 	// Subscribing afterwards does not replay it.
 	e.subscriber(1, store.LangEnglish)
@@ -228,9 +234,9 @@ func TestBlockedSubscriberDeactivated(t *testing.T) {
 	if c := e.status(ch.ID); c.Status != store.StatusNotified {
 		t.Errorf("status = %s", c.Status)
 	}
-	subs, err := e.st.SubscribersFor(t.Context(), src)
-	if err != nil || len(subs) != 1 || subs[0].TelegramID != 2 {
-		t.Errorf("active subscribers = %+v, %v; want only 2", subs, err)
+	rs, err := e.st.RecipientsFor(t.Context(), src)
+	if err != nil || len(rs) != 1 || rs[0].Address != "2" {
+		t.Errorf("active recipients = %+v, %v; want only telegram user 2", rs, err)
 	}
 }
 
@@ -275,8 +281,12 @@ func TestCosmeticSuppressed(t *testing.T) {
 func TestResumeAfterCrashSendsEachAlertOnce(t *testing.T) {
 	e := newEnv(t, nil)
 	src := e.source(feedURL, store.KindFeed, store.LangEnglish)
-	a := e.subscriber(1, store.LangEnglish)
+	e.subscriber(1, store.LangEnglish)
 	e.subscriber(2, store.LangEnglish)
+	a, err := e.st.ContactByAddress(t.Context(), store.ChannelTelegram, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	ch := e.change(src, store.ChangeAdded, addedDiff)
 
 	// Simulate the state the crash left: summarized, subscriber 1 done.

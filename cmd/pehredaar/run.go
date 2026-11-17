@@ -22,6 +22,7 @@ import (
 	"github.com/akkuraina/pehredaar/internal/notifier"
 	"github.com/akkuraina/pehredaar/internal/outbox"
 	"github.com/akkuraina/pehredaar/internal/scheduler"
+	"github.com/akkuraina/pehredaar/internal/store"
 	"github.com/akkuraina/pehredaar/internal/store/sqlite"
 	"github.com/akkuraina/pehredaar/internal/summarizer"
 )
@@ -133,7 +134,7 @@ func runServe(ctx context.Context, args []string) error {
 		proc := outbox.New(outbox.Config{
 			Store:      st,
 			Summarizer: sum,
-			Notifier:   tg,
+			Senders:    map[store.Channel]outbox.Sender{store.ChannelTelegram: tg},
 			Categories: sources.Categories(),
 			Logger:     log,
 		})
