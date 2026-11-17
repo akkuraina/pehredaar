@@ -10,7 +10,9 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -115,7 +117,9 @@ func (s *Server) Hub() *Hub { return s.hub }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(24*time.Hour, http.FileServerFS(static))))
+	// Pages always link with ?v=<content hash> (assetURL), so a URL's
+	// content never changes and can be cached for a year.
+	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(365*24*time.Hour, http.FileServerFS(static))))
 
 	mux.HandleFunc("GET /{$}", s.landing)
 	mux.HandleFunc("GET /join", s.joinForm)
@@ -156,6 +160,32 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// assetVersions maps each static file to a short hash of its contents.
+// Pages link to "/static/site.css?v=<hash>", so a deploy that changes a
+// file changes its URL and browsers fetch it fresh, while unchanged files
+// stay cached. The files are embedded, so this is computed once.
+var assetVersions = func() map[string]string {
+	out := map[string]string{}
+	fs.WalkDir(staticFS, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := staticFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(b)
+		out[strings.TrimPrefix(path, "static/")] = hex.EncodeToString(sum[:5])
+		return nil
+	})
+	return out
+}()
+
+// assetURL is the versioned URL of a static file (template func "asset").
+func assetURL(name string) string {
+	return "/static/" + name + "?v=" + assetVersions[name]
 }
 
 func cacheFor(d time.Duration, next http.Handler) http.Handler {

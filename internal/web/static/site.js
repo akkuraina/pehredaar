@@ -44,6 +44,18 @@
     bubble.classList.remove("say"); void bubble.offsetWidth; bubble.classList.add("say");
   };
 
+  // ---- the nav appears once you scroll past the hero (landing page) -------
+  if (document.body.classList.contains("nav-autohide")) {
+    const hero = $(".hero");
+    const sync = () => {
+      const limit = hero ? hero.offsetTop + hero.offsetHeight * 0.55 : 240;
+      document.body.classList.toggle("scrolled", scrollY > limit);
+    };
+    addEventListener("scroll", sync, { passive: true });
+    addEventListener("resize", sync);
+    sync();
+  }
+
   // ---- hero: the word that changed quietly --------------------------------
   const cycle = $(".cycle");
   if (cycle && !calm) {

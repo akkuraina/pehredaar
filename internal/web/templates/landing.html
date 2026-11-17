@@ -8,7 +8,7 @@
       <a class="btn btn-amber btn-lg" href="/join">Put me on watch <span aria-hidden="true">→</span></a>
       <a class="btn btn-ghost btn-lg" href="#live">See what I caught</a>
     </div>
-    <p class="muted small">Free. 30 seconds. No passwords.</p>
+    <p class="muted small">Free. 30 seconds. No passwords.{{if not .Signed}} Already on my list? <a href="/login">Sign in</a>.{{else}} <a href="/feed">Open your watch →</a>{{end}}</p>
   </div>
   <div class="hero-owl" aria-hidden="true">
     <div class="sweep"></div>

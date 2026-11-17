@@ -47,7 +47,7 @@ const htmlBase = `{{define "top"}}<!doctype html>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f1e7;padding:24px 12px;">
 <tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,'Noto Sans','Noto Sans Devanagari',Arial,sans-serif;color:#141a2e;">
-<tr><td style="background:#141a2e;padding:18px 24px;">
+<tr><td style="background:#000000;padding:18px 24px;">
   <span style="font-size:22px;">🦉</span>
   <span style="color:#ffb547;font-weight:700;font-size:18px;letter-spacing:.5px;vertical-align:3px;">&nbsp;pehredaar</span>
 </td></tr>

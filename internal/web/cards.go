@@ -208,6 +208,7 @@ func (s *Server) funcs() template.FuncMap {
 		"day":     func(t time.Time) string { return t.In(ist).Format("2 Jan 2006") },
 		"join":    strings.Join,
 		"hasText": func(s string) bool { return strings.TrimSpace(s) != "" },
+		"asset":   assetURL,
 	}
 }
 

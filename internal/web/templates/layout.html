@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 <meta name="description" content="Pehredaar is an owl that watches official exam notices day and night and tells you, in plain words, the moment a date, fee or eligibility rule changes.">
-<meta name="theme-color" content="#0b1020">
-<link rel="icon" href="/static/owl.svg" type="image/svg+xml">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="{{asset "owl.svg"}}" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Mukta:wght@400;600&display=swap">
-<link rel="stylesheet" href="/static/site.css">
-<script src="/static/site.js" defer></script>
+<link rel="stylesheet" href="{{asset "site.css"}}">
+<script src="{{asset "site.js"}}" defer></script>
 </head>
-<body data-page="{{.Page}}"{{with .EventsQS}} data-events="/events{{.}}"{{end}}>
+<body data-page="{{.Page}}"{{if and (eq .Page "landing") (not .Signed)}} class="nav-autohide"{{end}}{{with .EventsQS}} data-events="/events{{.}}"{{end}}>
 <div class="sky" aria-hidden="true"><span class="stars s1"></span><span class="stars s2"></span><span class="stars s3"></span></div>
 <a class="skip" href="#main">Skip to content</a>
 <header class="nav">
@@ -47,15 +47,15 @@
      that's the point. */}}
 {{define "owl"}}<svg class="owl owl-{{.}}" viewBox="0 0 200 210" role="img" aria-label="Pehredaar the owl">
   <defs>
-    <radialGradient id="g-belly-{{.}}" cx="50%" cy="35%" r="70%"><stop offset="0" stop-color="#3b4a85"/><stop offset="1" stop-color="#232c55"/></radialGradient>
+    <radialGradient id="g-belly-{{.}}" cx="50%" cy="35%" r="70%"><stop offset="0" stop-color="#9a6a3e"/><stop offset="1" stop-color="#5a3820"/></radialGradient>
     <radialGradient id="g-iris-{{.}}" cx="45%" cy="40%" r="60%"><stop offset="0" stop-color="#ffd27a"/><stop offset=".7" stop-color="#ffb547"/><stop offset="1" stop-color="#e48a0c"/></radialGradient>
   </defs>
   <g class="owl-body">
-    <path d="M42 70 L30 18 L74 46 Z" fill="#1c2448"/>
-    <path d="M158 70 L170 18 L126 46 Z" fill="#1c2448"/>
-    <ellipse cx="100" cy="122" rx="78" ry="82" fill="#1c2448"/>
+    <path d="M42 70 L30 18 L74 46 Z" fill="#3b2416"/>
+    <path d="M158 70 L170 18 L126 46 Z" fill="#3b2416"/>
+    <ellipse cx="100" cy="122" rx="78" ry="82" fill="#3b2416"/>
     <ellipse cx="100" cy="140" rx="54" ry="58" fill="url(#g-belly-{{.}})"/>
-    <path d="M78 150q8 6 16 0M106 150q8 6 16 0M86 168q8 6 16 0M98 132q8 6 16 0M74 132q8 6 16 0" stroke="#4a5a9c" stroke-width="3" fill="none" stroke-linecap="round" opacity=".7"/>
+    <path d="M78 150q8 6 16 0M106 150q8 6 16 0M86 168q8 6 16 0M98 132q8 6 16 0M74 132q8 6 16 0" stroke="#c08a52" stroke-width="3" fill="none" stroke-linecap="round" opacity=".7"/>
   </g>
   <g class="owl-face">
     <circle cx="68" cy="88" r="34" fill="#f2e7d0"/>
@@ -64,7 +64,7 @@
     <circle cx="132" cy="88" r="25" fill="url(#g-iris-{{.}})" class="iris"/>
     <g class="pupil" data-cx="68" data-cy="88"><circle cx="68" cy="88" r="12" fill="#0b1020"/><circle cx="73" cy="82" r="4" fill="#fff"/></g>
     <g class="pupil" data-cx="132" data-cy="88"><circle cx="132" cy="88" r="12" fill="#0b1020"/><circle cx="137" cy="82" r="4" fill="#fff"/></g>
-    <path class="lid" d="M34 88a34 34 0 0 1 68 0z M98 88a34 34 0 0 1 68 0z" fill="#1c2448"/>
+    <path class="lid" d="M34 88a34 34 0 0 1 68 0z M98 88a34 34 0 0 1 68 0z" fill="#3b2416"/>
     <path d="M92 108 L108 108 L100 124 Z" fill="#ffb547"/>
   </g>
   <g class="owl-feet" fill="#ffb547"><path d="M76 200q4-10 8 0q4-10 8 0z"/><path d="M108 200q4-10 8 0q4-10 8 0z"/></g>

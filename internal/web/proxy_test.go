@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,18 @@ func TestHealthz(t *testing.T) {
 	e.st.Close()
 	if resp, _ := e.get(e.client(), "/healthz"); resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("with the database closed: %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestAssetsAreVersioned(t *testing.T) {
+	e := newEnv(t)
+	_, body := e.get(e.client(), "/")
+	u := assetURL("site.css")
+	if len(assetVersions["site.css"]) != 10 || !strings.Contains(body, `href="`+u+`"`) {
+		t.Fatalf("page doesn't link %q", u)
+	}
+	resp, _ := e.get(e.client(), u)
+	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Cache-Control"), "max-age=31536000") {
+		t.Errorf("%s: %d, Cache-Control %q", u, resp.StatusCode, resp.Header.Get("Cache-Control"))
 	}
 }
