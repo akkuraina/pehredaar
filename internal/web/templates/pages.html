@@ -1,0 +1,69 @@
+{{define "message"}}{{template "head" .}}
+<section class="center-card reveal">
+  {{template "owl" (or .Mood "happy")}}
+  <h1>{{.Heading}}</h1>
+  <p class="lede">{{.Body}}</p>
+  {{with .Action}}<a class="btn btn-amber" href="{{.URL}}">{{.Label}}</a>{{end}}
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "login"}}{{template "head" .}}
+<section class="center-card reveal">
+  {{template "owl" "alert"}}
+  <h1>Welcome back</h1>
+  {{if .EmailEnabled}}
+  <p class="lede">No passwords here. Tell me your email and I'll send a link that signs you in.</p>
+  {{with .Error}}<div class="alert" role="alert"><p>{{.}}</p></div>{{end}}
+  <form method="post" action="/login" class="stack">
+    <label class="field"><span>Email</span><input type="email" name="email" value="{{.Email}}" autocomplete="email" required placeholder="you@example.com"></label>
+    <button class="btn btn-amber btn-lg">Email me a link</button>
+  </form>
+  {{end}}
+  {{with .BotLink}}<p class="muted">On Telegram? Open <a href="{{.}}" rel="noopener">the bot</a> and send <code>/feed</code> for a sign-in link.</p>{{end}}
+  <p class="muted small">New here? <a href="/join">Join in 30 seconds →</a></p>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "change"}}{{template "head" .}}
+<section class="change">
+  <p class="eyebrow"><a href="/">← Pehredaar</a></p>
+  {{template "card" .Card}}
+  {{if .Card.PDFChange}}<p class="muted small">This change is inside the document <b>{{.Card.DocLabel}}</b>.</p>{{end}}
+  {{with .Diff}}<details class="raw">
+    <summary>Exactly what changed in the official text</summary>
+    <pre>{{.}}</pre>
+  </details>{{end}}
+  <div class="cta-band small-band">
+    <div>{{template "owl" "happy"}}</div>
+    <div><h2>Want changes like this the moment they happen?</h2><a class="btn btn-amber" href="/join">Put me on watch →</a></div>
+  </div>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "unsubscribe"}}{{template "head" .}}
+<section class="center-card reveal">
+  {{if .Done}}
+    {{template "owl" "sleepy"}}
+    <h1>Email alerts are off</h1>
+    <p class="lede">I won't email <b>{{.Address}}</b> again. Telegram alerts, if you have them, keep coming.</p>
+    <a class="btn btn-ghost" href="/login">Changed your mind? Sign in</a>
+  {{else}}
+    {{template "owl" "alert"}}
+    <h1>Stop emailing {{.Address}}?</h1>
+    <p class="lede">You'll stop getting change alerts by email. Nothing else changes.</p>
+    <form method="post" action="/u/{{.Signed}}"><button class="btn btn-amber btn-lg">Yes, unsubscribe</button></form>
+  {{end}}
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "privacy"}}{{template "head" .}}
+<section class="prose reveal">
+  <h1>Privacy, in plain words</h1>
+  <p><b>What I keep.</b> The exams and notices you chose, your alert language, and how to reach you: your email address and/or your Telegram account number. Nothing else. No names, no phone numbers, no passwords.</p>
+  <p><b>Why.</b> Only to send you alerts about changes to exam notices, and sign-in links you ask for. I don't send marketing, and I don't sell or share your details.</p>
+  <p><b>Who else sees it.</b> Emails go out through <a href="https://resend.com" rel="noopener">Resend</a>, and Telegram messages through Telegram. Summaries of public notices are written with Anthropic's Claude; your details are never sent there. This site loads its fonts from Google Fonts.</p>
+  <p><b>Stopping.</b> Every email has a one-click unsubscribe. On Telegram, send <code>/stop all</code>. To erase everything, sign in and use <a href="/feed#account">Delete everything about me</a>: it's immediate.</p>
+  <p><b>Cookies.</b> One, to keep you signed in. No trackers, no analytics.</p>
+  <p class="muted small">Pehredaar is an independent project, not affiliated with SSC or any government body. Always confirm with the official notice.</p>
+</section>
+{{template "foot" .}}{{end}}

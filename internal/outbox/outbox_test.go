@@ -346,7 +346,7 @@ func TestAlertLinksSkipBadRedirects(t *testing.T) {
 	diff := "+ a | 2026-11-01 | A | link: javascript:alert(1)\n" +
 		"+ b | 2026-11-01 | B | link: https://ssc.gov.in/x\n" +
 		"- c | 2026-10-01 | C | att: uploads/old.pdf (1 B)"
-	got := alertLinks(src, diff)
+	got := AlertLinks(src, diff)
 	if len(got) != 1 || got[0] != (notifier.Link{URL: "https://ssc.gov.in/x"}) {
 		t.Errorf("links = %+v", got)
 	}

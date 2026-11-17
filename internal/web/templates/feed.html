@@ -1,0 +1,63 @@
+{{define "feed"}}{{template "head" .}}
+<section class="feed-head">
+  <div class="feed-hello">
+    <div class="feed-owl" aria-hidden="true">{{template "owl" "hero"}}</div>
+    <div>
+      <p class="eyebrow"><span class="live-dot"></span> Your watch</p>
+      <h1>{{if .Watching}}I'm watching {{len .Watching}} feed{{if gt (len .Watching) 1}}s{{end}} for you.{{else}}Nothing live to watch yet.{{end}}</h1>
+      {{with .Watching}}<p class="muted">{{join . " · "}}</p>{{end}}
+      <div class="contact-row">
+        {{range .Contacts}}<span class="chip {{if and .Verified .Active}}chip-ok{{else}}chip-wait{{end}}">
+          {{if eq .Channel "telegram"}}✈️ Telegram{{else}}✉️ {{.Address}}{{end}}
+          · {{if not .Verified}}confirm via email{{else if not .Active}}paused{{else}}on{{end}}</span>{{end}}
+        {{with .BotLink}}<a class="chip chip-add" href="{{.}}" rel="noopener">+ Add Telegram</a>{{end}}
+        <a class="chip chip-add" href="/join">✎ Change what I watch</a>
+      </div>
+    </div>
+  </div>
+  {{with .Notice}}<div class="notice reveal" role="status">🦉 {{.}}</div>{{end}}
+</section>
+
+<div class="feed-layout">
+  <section class="feed-main" aria-label="Changes I caught">
+    <h2 class="feed-h">Caught for you</h2>
+    <div class="cards" id="cards" data-live>
+      {{range .Cards}}{{template "card" .}}{{else}}
+      <div class="empty">{{template "owl" "sleepy"}}<p><b>No changes yet.</b><br>The moment one of your feeds changes, it lands here, live, and on your {{if .Contacts}}phone{{else}}screen{{end}}.</p></div>
+      {{end}}
+    </div>
+    {{if .MoreBefore}}<button class="btn btn-ghost more" data-more="{{.MoreBefore}}">Show older</button>{{end}}
+  </section>
+
+  <aside class="feed-side">
+    {{if .Notices}}<section class="shelf">
+      <h2 class="feed-h">On the notice board now</h2>
+      <p class="muted small">What the official feeds list right now, newest first.</p>
+      <ul class="notices">
+        {{range .Notices}}<li class="notice-item reveal">
+          <span class="notice-meta">{{with .Exam}}<b>{{.}}</b> · {{end}}{{.Feed}}{{if not .Date.IsZero}} · {{day .Date}}{{end}}</span>
+          <span class="notice-title">{{.Headline}}</span>
+          {{range .Links}}<a class="pill pill-sm" href="{{.URL}}" rel="noopener" target="_blank">{{if .PDF}}📄 PDF{{else}}🔗 Link{{end}}</a>{{end}}
+        </li>{{end}}
+      </ul>
+    </section>{{end}}
+
+    {{if .ComingSoon}}<section class="shelf">
+      <h2 class="feed-h">Coming soon</h2>
+      {{range .ComingSoon}}<div class="soon reveal"><b>{{.Name}}</b><span class="muted small">{{.Hint}}</span><p class="small">Not on my watch yet. You'll be the first to know when it is.</p></div>{{end}}
+    </section>{{end}}
+
+    <section class="shelf" id="account">
+      <h2 class="feed-h">Your data</h2>
+      <p class="small muted">I keep only your choices and how to reach you. <a href="/privacy">Privacy note</a>.</p>
+      <details class="danger">
+        <summary>Delete everything about me</summary>
+        <form method="post" action="/account/delete">
+          <label class="field"><span>Type DELETE to confirm</span><input name="confirm" autocomplete="off" pattern="DELETE" required></label>
+          <button class="btn btn-danger">Delete my account</button>
+        </form>
+      </details>
+    </section>
+  </aside>
+</div>
+{{template "foot" .}}{{end}}

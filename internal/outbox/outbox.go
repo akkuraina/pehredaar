@@ -186,7 +186,7 @@ func (p *Processor) process(ctx context.Context, ch store.Change) error {
 	if title == "" {
 		title = src.Label
 	}
-	links := alertLinks(src, ch.Diff)
+	links := AlertLinks(src, ch.Diff)
 	sent := 0
 	for _, r := range recips {
 		send := p.senders[r.Channel]
@@ -289,10 +289,10 @@ func languages(rs []store.Recipient) []store.Language {
 	return out
 }
 
-// alertLinks picks the links shown under an alert: the document itself for
+// AlertLinks picks the links shown under an alert: the document itself for
 // a PDF change, or the attachments and links of new and edited items for a
 // feed change.
-func alertLinks(src store.Source, diff string) []notifier.Link {
+func AlertLinks(src store.Source, diff string) []notifier.Link {
 	if src.Kind != store.KindFeed {
 		return []notifier.Link{{URL: src.URL, PDF: src.Kind == store.KindPDF}}
 	}

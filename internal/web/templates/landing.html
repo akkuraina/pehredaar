@@ -1,0 +1,79 @@
+{{define "landing"}}{{template "head" .}}
+<section class="hero">
+  <div class="hero-copy reveal">
+    <p class="eyebrow"><span class="live-dot"></span> On watch right now</p>
+    <h1>They changed the <span class="cycle" aria-live="off"><span>last date</span><span>age limit</span><span>exam fee</span><span>eligibility</span><span>exam city</span></span> quietly.<br><em>I caught it.</em></h1>
+    <p class="lede">I'm <strong>Pehredaar</strong>, an owl who reads official exam notices day and night. The moment a date, fee or rule changes, I tell you on Telegram or email, in plain words.</p>
+    <div class="cta-row">
+      <a class="btn btn-amber btn-lg" href="/join">Put me on watch <span aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost btn-lg" href="#live">See what I caught</a>
+    </div>
+    <p class="muted small">Free. 30 seconds. No passwords.</p>
+  </div>
+  <div class="hero-owl" aria-hidden="true">
+    <div class="sweep"></div>
+    {{template "owl" "hero"}}
+    <div class="bubble" id="owl-bubble">👀 I don't blink.</div>
+  </div>
+</section>
+
+<section class="pulse reveal" aria-label="What I'm watching right now">
+  <div class="pulse-item"><span class="live-dot"></span><span><b data-count="feeds">{{.Stats.Feeds}}</b> official feeds</span></div>
+  <div class="pulse-item"><span><b data-count="sources">{{.Stats.Sources}}</b> notices &amp; PDFs watched</span></div>
+  <div class="pulse-item"><span><b data-count="caught">{{.Stats.ChangesCaught}}</b> changes caught</span></div>
+  <div class="pulse-item"><span>last look <b class="ago" data-last-check{{if not .Stats.LastCheckAt.IsZero}} datetime="{{iso .Stats.LastCheckAt}}"{{end}}>{{if .Stats.LastCheckAt.IsZero}}not yet{{else}}{{ago .Stats.LastCheckAt}}{{end}}</b></span></div>
+</section>
+
+{{with .Spotlight}}
+<section class="spotlight reveal" aria-label="A recent catch">
+  <p class="eyebrow">A real catch</p>
+  <h2>{{.Headline}}</h2>
+  <div class="morph-list">
+  {{range .Details}}{{if .IsChange}}
+    <div class="morph">{{with .Label}}<span class="morph-label">{{.}}</span>{{end}}
+      <span class="morph-old">{{.Old}}</span><span class="morph-arrow">→</span><span class="morph-new" data-type="{{.New}}">{{.New}}</span>
+    </div>
+  {{end}}{{end}}
+  </div>
+  <a class="pill" href="/c/{{.ID}}">See the whole change →</a>
+</section>
+{{end}}
+
+<section id="live" class="live">
+  <div class="section-head reveal">
+    <p class="eyebrow"><span class="live-dot"></span> Live</p>
+    <h2>Caught lately</h2>
+    <p class="muted">New catches drop in here on their own. Keep this tab open and watch.</p>
+  </div>
+  <div class="cards" id="cards" data-live>
+    {{range .Cards}}{{template "card" .}}{{else}}
+    <div class="empty reveal">{{template "owl" "sleepy"}}<p><b>All quiet so far.</b><br>Nothing has changed since I started watching. I'm still looking, every few minutes.</p></div>
+    {{end}}
+  </div>
+</section>
+
+<section id="how" class="how">
+  <div class="section-head reveal"><p class="eyebrow">How it works</p><h2>You study. I watch.</h2></div>
+  <ol class="steps">
+    <li class="reveal"><span class="step-n">1</span><h3>Tell me your exams</h3><p>A four-question survey. Pick exams, the kind of notices you care about, and how to reach you.</p></li>
+    <li class="reveal"><span class="step-n">2</span><h3>I read every notice</h3><p>Every few minutes I check the official feeds and the PDFs inside them, and compare them with what I saw before.</p></li>
+    <li class="reveal"><span class="step-n">3</span><h3>You hear it first</h3><p>A short, plain message: <em>"Last date moved from 12 Nov to 20 Nov."</em> With the official link, so you can check.</p></li>
+  </ol>
+</section>
+
+<section class="exams">
+  <div class="section-head reveal"><p class="eyebrow">Exams</p><h2>What I watch</h2><p class="muted">SSC is live. Tell me which others you want, and you'll be the first to know when I start on them.</p></div>
+  <div class="exam-grid">
+    {{range .Exams}}<a class="exam reveal{{if .Live}} is-live{{end}}" href="/join?exam={{.ID}}">
+      <span class="exam-name">{{.Name}}</span>
+      <span class="exam-hint">{{.Hint}}</span>
+      <span class="exam-state">{{if .Live}}<span class="live-dot"></span> Live{{else}}Soon{{end}}</span>
+    </a>{{end}}
+  </div>
+</section>
+
+<section class="cta-band reveal">
+  <div>{{template "owl" "happy"}}</div>
+  <div><h2>Never miss a quiet change again.</h2><p>Join in 30 seconds. Leave in one click.</p><a class="btn btn-amber btn-lg" href="/join">Put me on watch →</a></div>
+</section>
+{{template "foot" .}}{{end}}

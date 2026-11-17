@@ -1,0 +1,75 @@
+{{define "join"}}{{template "head" .}}
+<section class="join">
+  <div class="join-owl" aria-hidden="true">{{template "owl" "hero"}}<div class="bubble" id="join-bubble">{{if .Edit}}What should I change?{{else}}Four quick questions. 🦉{{end}}</div></div>
+
+  <form class="survey" method="post" action="/join" novalidate data-survey>
+    <div class="progress" aria-hidden="true"><span></span></div>
+    {{if .Errors}}<div class="alert" role="alert">{{range .Errors}}<p>{{.}}</p>{{end}}</div>{{end}}
+
+    <fieldset class="step" data-step="1" data-say="Which exams are you preparing for?">
+      <legend><span class="step-count">1 / 4</span>Which exams should I watch for you?</legend>
+      <p class="muted">Pick as many as you like. Only SSC is live today; I'll tell you when the others go live.</p>
+      <div class="chips chips-exams">
+        {{range .Exams}}<label class="choice{{if .Live}} is-live{{end}}">
+          <input type="checkbox" name="exam" value="{{.ID}}"{{if index $.Sel.Exams .ID}} checked{{end}}>
+          <span><b>{{.Name}}</b><small>{{.Hint}}</small><i>{{if .Live}}● Live{{else}}Soon{{end}}</i></span>
+        </label>{{end}}
+      </div>
+    </fieldset>
+
+    <fieldset class="step" data-step="2" data-say="Which kinds of notices matter to you?">
+      <legend><span class="step-count">2 / 4</span>Which notices matter to you?</legend>
+      <p class="muted">Leave them all on if you're not sure. You can change this any time.</p>
+      {{range .FeedGroups}}<div class="feed-group" data-exam="{{.Exam.ID}}">
+        <h3>{{.Exam.Name}}</h3>
+        <div class="chips">
+        {{range .Feeds}}<label class="choice choice-sm"><input type="checkbox" name="feed" value="{{.ID}}"{{if or (index $.Sel.Feeds .ID) (not $.Edit)}} checked{{end}}><span><b>{{.Label}}</b></span></label>{{end}}
+        </div>
+      </div>{{end}}
+      <p class="muted small feed-none" hidden>None of your exams are live yet, so there's nothing to choose here. I'll ask again when they are.</p>
+    </fieldset>
+
+    <fieldset class="step" data-step="3" data-say="How should I tell you?">
+      <legend><span class="step-count">3 / 4</span>How should I tell you?</legend>
+      <div class="chips chips-via">
+        <label class="choice"><input type="radio" name="via" value="telegram"{{if eq .Sel.Via "telegram"}} checked{{end}}{{if not .TGEnabled}} disabled{{end}}><span><b>✈️ Telegram</b><small>Fastest. A message within minutes.</small>{{if not .TGEnabled}}<i>Unavailable right now</i>{{end}}</span></label>
+        <label class="choice"><input type="radio" name="via" value="email"{{if eq .Sel.Via "email"}} checked{{end}}{{if not .EmailEnabled}} disabled{{end}}><span><b>✉️ Email</b><small>A tidy email, with the official PDF linked.</small>{{if not .EmailEnabled}}<i>Coming soon</i>{{end}}</span></label>
+        <label class="choice"><input type="radio" name="via" value="both"{{if eq .Sel.Via "both"}} checked{{end}}{{if not (and .TGEnabled .EmailEnabled)}} disabled{{end}}><span><b>Both</b><small>Belt and braces.</small></span></label>
+      </div>
+      <label class="field email-field">
+        <span>Your email</span>
+        <input type="email" name="email" value="{{.Sel.Email}}" autocomplete="email" inputmode="email" placeholder="you@example.com" maxlength="254">
+        {{if .HasEmail}}<small class="muted">Currently: {{.HasEmail}}</small>{{end}}
+      </label>
+      {{if .HasTelegram}}<p class="muted small">✈️ Telegram is already linked.</p>{{end}}
+      <label class="hp" aria-hidden="true">Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+    </fieldset>
+
+    <fieldset class="step" data-step="4" data-say="Last one. English or Hindi?">
+      <legend><span class="step-count">4 / 4</span>Which language for alerts?</legend>
+      <div class="chips chips-lang">
+        <label class="choice"><input type="radio" name="lang" value="en"{{if ne .Sel.Lang "hi"}} checked{{end}}><span><b>English</b><small>"Last date moved to 20 Nov."</small></span></label>
+        <label class="choice"><input type="radio" name="lang" value="hi"{{if eq .Sel.Lang "hi"}} checked{{end}}><span><b lang="hi">हिन्दी</b><small lang="hi">"अंतिम तिथि 20 नवंबर हो गई।"</small></span></label>
+      </div>
+      <p class="muted small">By joining you agree to my short <a href="/privacy">privacy note</a>. I only email or message you about exam changes.</p>
+    </fieldset>
+
+    <div class="survey-nav">
+      <button type="button" class="btn btn-ghost" data-back hidden>← Back</button>
+      <button type="button" class="btn btn-amber" data-next hidden>Next →</button>
+      <button type="submit" class="btn btn-amber" data-submit>{{if .Edit}}Save changes{{else}}Start watching 🦉{{end}}</button>
+    </div>
+  </form>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "telegram"}}{{template "head" .}}
+<section class="center-card reveal">
+  {{template "owl" "happy"}}
+  <h1>One last tap</h1>
+  <p class="lede">Open Telegram and press <b>Start</b>. That links your account, and alerts will come there.</p>
+  <a class="btn btn-amber btn-lg" href="{{.Link}}" rel="noopener">✈️ Open Telegram</a>
+  {{if .EmailToo}}<p class="muted">I've also emailed you a link to confirm your address.</p>{{end}}
+  <p class="muted small">The link works for 24 hours. Already done? <a href="{{.FeedURL}}">Go to your watch →</a></p>
+</section>
+{{template "foot" .}}{{end}}

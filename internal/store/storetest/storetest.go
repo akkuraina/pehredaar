@@ -48,6 +48,7 @@ func Run(t *testing.T, open Opener) {
 		{"EmailContacts", testEmailContacts},
 		{"LinkTelegramMerges", testLinkTelegramMerges},
 		{"Interests", testInterests},
+		{"DeleteSubscriber", testDeleteSubscriber},
 		{"Tokens", testTokens},
 		{"Setting", testSetting},
 		{"FeedChanges", testFeedChanges},
@@ -980,5 +981,39 @@ func testMarkDeliveredConcurrent(t *testing.T, s store.Store) {
 	wg.Wait()
 	if wins != 1 {
 		t.Errorf("%d goroutines won the delivery, want exactly 1", wins)
+	}
+}
+
+func testDeleteSubscriber(t *testing.T, s store.Store) {
+	src := mustSource(t, s, "https://example.test/del", "c")
+	ch := mustChange(t, s, src)
+	sub := mustSubscriber(t, s, 3)
+	c := telegramContact(t, s, 3)
+	email, _ := s.AddEmail(ctx(t), sub.ID, "del@example.test")
+	s.Subscribe(ctx(t), sub.ID, store.Target{Category: "c"})
+	s.SetInterests(ctx(t), sub.ID, []string{"upsc"})
+	s.MarkDelivered(ctx(t), ch.ID, c.ID)
+
+	if err := s.DeleteSubscriber(ctx(t), sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Subscriber(ctx(t), sub.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("subscriber still there: %v", err)
+	}
+	for _, id := range []int64{c.ID, email.ID} {
+		if _, err := s.Contact(ctx(t), id); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("contact %d still there: %v", id, err)
+		}
+	}
+	if rs, _ := s.RecipientsFor(ctx(t), src); len(rs) != 0 {
+		t.Errorf("recipients after delete = %+v", rs)
+	}
+	if err := s.DeleteSubscriber(ctx(t), sub.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("second delete err = %v", err)
+	}
+	// The address is free again.
+	again, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
+	if c2, err := s.AddEmail(ctx(t), again.ID, "del@example.test"); err != nil || c2.SubscriberID != again.ID {
+		t.Errorf("re-adding a deleted address = %+v, %v", c2, err)
 	}
 }

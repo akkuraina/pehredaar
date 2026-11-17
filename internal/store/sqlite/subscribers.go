@@ -69,6 +69,16 @@ func (s *Store) SetLanguage(ctx context.Context, subscriberID int64, lang store.
 	return rowsAffectedOrNotFound(res, fmt.Sprintf("subscriber %d", subscriberID))
 }
 
+func (s *Store) DeleteSubscriber(ctx context.Context, id int64) error {
+	// ON DELETE CASCADE removes contacts (and with them deliveries),
+	// subscriptions, interests and tokens.
+	res, err := s.db.ExecContext(ctx, `DELETE FROM subscribers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete subscriber %d: %w", id, err)
+	}
+	return rowsAffectedOrNotFound(res, fmt.Sprintf("subscriber %d", id))
+}
+
 // --- contacts --------------------------------------------------------------
 
 const contactColumns = `id, subscriber_id, channel, address, chat_id, verified_at, active, created_at`

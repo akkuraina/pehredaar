@@ -343,6 +343,9 @@ type Store interface {
 	VerifyContact(ctx context.Context, contactID int64) error
 	SetContactActive(ctx context.Context, contactID int64, active bool) error
 	SetLanguage(ctx context.Context, subscriberID int64, lang Language) error
+	// DeleteSubscriber removes a person and everything about them:
+	// contacts, subscriptions, interests, tokens and delivery records.
+	DeleteSubscriber(ctx context.Context, id int64) error
 
 	// Subscriptions and interests.
 
