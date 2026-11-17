@@ -11,8 +11,16 @@ age limit changed from 27 to 25."
 
 ## Users and interface
 
-Exam aspirants. The Telegram bot is the entire UI in v1 (no web frontend).
-Commands: `/watch`, `/list`, `/stop`.
+Exam aspirants. They join on the public website (`internal/web`): a short
+survey picks exams, feeds, channel (Telegram, email or both) and language,
+and a personal feed shows what was caught, live. Alerts go to Telegram and/or
+email (Resend). Bot commands: `/watch`, `/list`, `/stop`, `/feed`.
+
+Persona: a sharp-eyed **owl**, "I don't blink. You don't have to." Modern,
+a little playful, first person, mostly English with some Hindi. Use that
+voice for any user-facing text (site, emails, bot). The site must feel alive
+(live updates, motion) but only ever show real data, and work without JS.
+Design details: `docs/ARCHITECTURE.md` §20.
 
 ## Pipeline
 
@@ -63,7 +71,11 @@ internal/
   differ/       # compare snapshots
   summarizer/   # change → alert text (Claude, with the template as fallback)
   notifier/     # Telegram bot: commands + sending
-  outbox/       # pending changes → summaries → alerts
+  email/        # Resend client + email templates
+  auth/         # one-time tokens, signed cookies, unsubscribe links
+  exams/        # exam catalog for the survey (live vs coming soon)
+  web/          # public website: landing, survey, sign-in, live feed
+  outbox/       # pending changes → summaries → alerts (one Sender per channel)
   store/        # DB access (interface + SQLite impl)
   scheduler/    # polling loop
   config/       # sources.yaml loading + sync
@@ -76,13 +88,15 @@ sources.yaml    # curated sources
 ```
 go build -o bin/pehredaar.exe ./cmd/pehredaar
 $env:TELEGRAM_BOT_TOKEN = "..."  # or put it in .env (gitignored); optional, without it no bot and no alerts
-bin/pehredaar.exe run            # scheduler + bot + dashboard at http://127.0.0.1:8787
+bin/pehredaar.exe run            # everything: website http://127.0.0.1:8788, dashboard :8787
 bin/pehredaar.exe probe <url>    # inspect one URL without touching the DB
 bin/pehredaar.exe summarize [id] # show a stored change's alert; sends nothing
 ```
 
-`.env` (gitignored) holds `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY`.
-Without the Anthropic key, alerts use the plain template. Summaries use
+`.env` (gitignored) holds `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY` and
+`RESEND_API_KEY`, each optional. Without the Anthropic key, alerts use the
+plain template. Without a verified Resend domain, email only reaches the
+Resend account owner's address. Summaries use
 Claude Haiku 5.5 (`claude-haiku-5-5`); override with `PEHREDAAR_LLM_MODEL`.
 
 State lives in `data/pehredaar.db` (gitignored). Delete it to start fresh.
@@ -93,7 +107,9 @@ Port 8080 is taken by a local Apache on the dev machine, hence 8787.
 - `sources` (id, url, type, category, check_interval)
 - `snapshots` (id, source_id, content_hash, text, fetched_at)
 - `changes` (id, source_id, old_snapshot_id, new_snapshot_id, summary, importance)
-- `subscribers`, `subscriptions` (telegram_id; exactly one of source or category)
+- `subscribers` (a person) and `contacts` (telegram or email; verified, active)
+- `subscriptions` (exactly one of source or category), `interests` (exams)
+- `deliveries` (change × contact), `tokens` (hashed one-time links), `settings`
 
 ## Build order
 

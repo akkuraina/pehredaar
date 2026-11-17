@@ -5,7 +5,7 @@
 Government exam notices get edited after they're published: last dates move,
 age limits change, fees are revised, corrigenda appear. Aspirants usually
 find out late, or not at all. Pehredaar watches the official SSC notice feeds
-and sends a Telegram message saying exactly what changed, for example:
+and tells you on Telegram or by email exactly what changed, for example:
 
 > 🔔 **SSC Calendar**
 > The CGL 2026 exam start date has moved from 1 May 2026 to 1 Jul 2026.
@@ -13,13 +13,17 @@ and sends a Telegram message saying exactly what changed, for example:
 > Notice updated: Combined Graduate Level Examination, 2026
 > • Start date: 1 May 2026 → 1 Jul 2026
 
-The Telegram bot is the whole user interface. There is no website or app.
+Pehredaar has a persona: a sharp-eyed owl. *"I don't blink. You don't have
+to."* People join through a short survey on the website, pick their exams and
+how to be told (Telegram, email or both), and get a live feed of what the owl
+has caught.
 
 ## What it does today
 
 Status: milestones 1–6 of the [build plan](docs/ARCHITECTURE.md#17-build-milestones)
-are done. It runs on a developer machine and has not been deployed for the
-public yet.
+are done, plus the public website and email alerts
+([architecture §20](docs/ARCHITECTURE.md#20-public-website-and-email-built-2026-11-17)).
+It runs on a developer machine and has not been deployed for the public yet.
 
 **Watches 9 SSC feeds** (from `ssc.gov.in`'s own JSON API):
 
@@ -67,18 +71,46 @@ Safety rules built in:
   baseline, not a change.
 - **No stale floods.** Changes older than 72 h when the bot comes back online
   are not sent.
+- **Dead links stop costing requests.** A source that returns 404 five times
+  in a row, or a scanned PDF with no text, is switched off (the dashboard
+  says why). PDFs found in feeds are retired after 120 days.
 - **Never silent.** If the Claude API fails, the plain alert is sent after 3
   attempts.
+
+### The website
+
+Run `pehredaar run` and open http://127.0.0.1:8788.
+
+| Page | What it does |
+|---|---|
+| Home (`/`) | The owl (its eyes follow your pointer), a live "watching now" pulse, a real old → new catch animated, and a ticker of caught changes that updates by itself |
+| Join (`/join`) | Four questions, one at a time: which exams (SSC is live; the rest are "coming soon"), which kinds of notices, Telegram / email / both, English or Hindi |
+| Your watch (`/feed`) | Changes caught for your feeds (new ones appear live), what the official notice board lists right now, "coming soon" exams, your channels, and "delete everything about me" |
+| Sign in (`/login`) | No passwords: an emailed link, or `/feed` in the Telegram bot |
+| A change (`/c/<id>`) | One change in full, with the official PDF; linked from alert emails |
+
+Everything on the site is real data from the database; nothing is made up.
+Pages work without JavaScript, and motion is off for people who ask their
+device for reduced motion.
+
+### Email
+
+Email alerts go out through [Resend](https://resend.com) once
+`RESEND_API_KEY` is set. An address gets no alerts until its owner clicks the
+confirmation link. Every alert has a one-click unsubscribe (Gmail and Yahoo
+require it). Until you verify a domain in Resend, it only delivers to your
+own Resend account address.
 
 ### The bot
 
 | Command | What it does |
 |---|---|
-| `/start` | Choose English or Hindi, then see help |
+| `/start` | Choose English or Hindi, then see help. From the website's "Open Telegram" button, it links your account to your web sign-up |
 | `/watch` | Tap buttons to pick feeds to watch (✅ marks ones you already watch) |
 | `/list` | Show what you're watching |
 | `/stop` | Stop watching a feed; `/stop all` stops everything |
 | `/language` | Switch between English and Hindi |
+| `/feed` | Get a one-time link that signs you in to the website |
 | `/help` | Show help |
 
 English subscribers get alerts from the English feeds. Hindi subscribers get
@@ -87,6 +119,8 @@ alerts from both, with summaries written in Hindi.
 ### Not done yet
 
 - Hosting on a server (it runs only while `pehredaar run` is running).
+- A sending domain for email, and handling bounced addresses (needs a public URL).
+- The website's own pages in Hindi (alerts and the bot already are).
 - Reading the PDF attached to a *new* notice to summarize it; today a new
   notice's summary is based on its headline and fields.
 - Per-exam subscriptions (e.g. only "CGL 2026"); v1 is per feed.
@@ -103,7 +137,8 @@ alerts from both, with summaries written in Hindi.
   - Windows: the Xpdf command-line tools from xpdfreader.com.
   - Linux: `sudo apt install poppler-utils`.
   - macOS: `brew install poppler`.
-- **A Telegram bot token** (optional, but there are no alerts without it).
+- **A Telegram bot token** (optional): without it, no Telegram alerts.
+- **A Resend API key** (optional): without it, no email sign-ups or alerts.
 - **An Anthropic API key** (optional): without it, alerts don't get a summary.
 
 ### 1. Build
@@ -132,9 +167,11 @@ commit it):
 ```
 TELEGRAM_BOT_TOKEN=123456789:AA...
 ANTHROPIC_API_KEY=sk-ant-...
+RESEND_API_KEY=re_...
 ```
 
-Get an Anthropic key at console.anthropic.com. Both lines are optional.
+Get an Anthropic key at console.anthropic.com and a Resend key at
+resend.com/api-keys. All three lines are optional.
 Values already set in your shell's environment take priority over `.env`.
 
 ### 4. Run
@@ -148,12 +185,19 @@ You should see, in the log:
 ```
 loaded .env vars=[TELEGRAM_BOT_TOKEN ANTHROPIC_API_KEY]
 sources synced ... curated=9
+email via Resend from="Pehredaar <onboarding@resend.dev>"
 summaries by Claude model=claude-haiku-5-5
 dashboard listening url=http://127.0.0.1:8787
+website listening url=http://127.0.0.1:8788
 telegram bot running
 ```
 
-Then message your bot `/start` and `/watch`. Stop with Ctrl+C.
+Then open the website at http://127.0.0.1:8788 and join, or message your bot
+`/start` and `/watch`. Stop with Ctrl+C.
+
+- **Website:** http://127.0.0.1:8788, the public site (§ "The website" above).
+  By default it only listens on this machine; set `PEHREDAAR_PUBLIC` and
+  `PEHREDAAR_BASE_URL` when deploying.
 
 - **Dashboard:** http://127.0.0.1:8787 shows every source, its last checks,
   snapshots, changes (as coloured diffs) and an activity log, with a "check
@@ -183,6 +227,10 @@ go test ./...                        # all tests; none touch SSC, Telegram or An
 | `PEHREDAAR_SOURCES` | Sources file | `sources.yaml` |
 | `PEHREDAAR_WORKERS` | Concurrent checks | `4` |
 | `PEHREDAAR_HTTP` | Dashboard address (localhost only) | `127.0.0.1:8787` |
+| `PEHREDAAR_PUBLIC` | Website address | `127.0.0.1:8788` |
+| `PEHREDAAR_BASE_URL` | The website's public URL, used in email and Telegram links | `http://` + `PEHREDAAR_PUBLIC` |
+| `RESEND_API_KEY` | Email via Resend. Unset: no email sign-ups or alerts | unset |
+| `PEHREDAAR_EMAIL_FROM` | Email sender | `Pehredaar <onboarding@resend.dev>` |
 | `PDFTOTEXT_PATH` | Path to `pdftotext` | found on `PATH` |
 
 Sources are curated by hand in [`sources.yaml`](sources.yaml) and synced into
@@ -201,6 +249,10 @@ internal/
   outbox/          pending changes → summaries → alerts
   summarizer/      change → alert text (Claude, with a template fallback)
   notifier/        Telegram bot: commands and sending
+  email/           Resend client and email templates
+  auth/            one-time sign-in tokens, signed cookies and unsubscribe links
+  exams/           the exams the survey offers
+  web/             the public website (templates, CSS, JS embedded in the binary)
   store/           Store interface + SQLite implementation
   dashboard/       local operator web UI
 docs/
