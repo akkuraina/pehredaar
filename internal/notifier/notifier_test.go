@@ -15,6 +15,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"golang.org/x/time/rate"
 
+	"github.com/akkuraina/pehredaar/internal/auth"
 	"github.com/akkuraina/pehredaar/internal/config"
 	"github.com/akkuraina/pehredaar/internal/store"
 	"github.com/akkuraina/pehredaar/internal/store/sqlite"
@@ -273,4 +274,58 @@ func subOf(t *testing.T, st *sqlite.Store, u user) int64 {
 		t.Fatal(err)
 	}
 	return sub.ID
+}
+
+// The website's deep link (/start <token>) attaches this Telegram account
+// to the person who filled in the survey.
+func TestStartWithTokenLinksWebSignUp(t *testing.T) {
+	c, st := newTestCommands(t)
+	ctx := t.Context()
+	web, _ := st.CreateSubscriber(ctx, store.LangEnglish)
+	if err := st.Subscribe(ctx, web.ID, store.Target{Category: "ssc:results"}); err != nil {
+		t.Fatal(err)
+	}
+	token, hash := auth.NewToken()
+	if err := st.CreateToken(ctx, store.Token{
+		Hash: hash, Purpose: store.TokenLinkTelegram, SubscriberID: web.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := ok(t)(c.startWith(ctx, alice, token))
+	if !strings.Contains(r.text, "Linked!") || !strings.Contains(r.text, "SSC Results") {
+		t.Errorf("reply:\n%s", r.text)
+	}
+	contact, err := st.ContactByAddress(ctx, store.ChannelTelegram, "111")
+	if err != nil || contact.SubscriberID != web.ID {
+		t.Errorf("telegram contact = %+v, %v; want it on the web subscriber", contact, err)
+	}
+
+	// The same link again: used up, so the normal welcome, with a note.
+	r = ok(t)(c.startWith(ctx, alice, token))
+	if !strings.Contains(r.text, "expired or was already used") || !strings.Contains(r.text, chooseLanguage) {
+		t.Errorf("reused link reply:\n%s", r.text)
+	}
+	// Plain /start still works.
+	if r := ok(t)(c.startWith(ctx, alice, "")); !strings.Contains(r.text, chooseLanguage) {
+		t.Errorf("plain start:\n%s", r.text)
+	}
+}
+
+func TestFeedSendsSignInLink(t *testing.T) {
+	c, st := newTestCommands(t)
+	if r := ok(t)(c.feed(t.Context(), alice)); !strings.Contains(r.text, "isn't available") {
+		t.Errorf("without a site:\n%s", r.text)
+	}
+	c.site = "https://pehredaar.test"
+	r := ok(t)(c.feed(t.Context(), alice))
+	i := strings.Index(r.text, "https://pehredaar.test/l/")
+	if i < 0 {
+		t.Fatalf("no link in:\n%s", r.text)
+	}
+	token := r.text[i+len("https://pehredaar.test/l/"):][:43]
+	got, err := st.ConsumeToken(t.Context(), auth.HashToken(token), store.TokenLogin, time.Now())
+	if err != nil || got.SubscriberID != subOf(t, st, alice) {
+		t.Errorf("login token = %+v, %v", got, err)
+	}
 }

@@ -41,15 +41,19 @@ type Bot struct {
 	perChat  map[int64]*rate.Limiter
 
 	sleep func(ctx context.Context, d time.Duration) error // replaceable in tests
+
+	username string // the bot's @name without the @, for website deep links
 }
 
 // New connects to Telegram (it checks the token with getMe, so a bad token
-// fails here, at startup) and registers the command handlers.
-func New(token string, st Store, cats []config.Category, log *slog.Logger) (*Bot, error) {
+// fails here, at startup) and registers the command handlers. site is the
+// public website's base URL, for /feed sign-in links ("" if none).
+func New(token string, st Store, cats []config.Category, site string, log *slog.Logger) (*Bot, error) {
 	if log == nil {
 		log = slog.Default()
 	}
 	b := newBot(nil, st, cats, log)
+	b.cmds.site = strings.TrimRight(site, "/")
 	tg, err := bot.New(token,
 		// The startup getMe check defaults to 5s, which one slow moment on
 		// Wi-Fi can exceed; a bad token still fails fast (Telegram answers
@@ -67,8 +71,17 @@ func New(token string, st Store, cats []config.Category, log *slog.Logger) (*Bot
 	}
 	b.tg, b.api = tg, tg
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if me, err := tg.GetMe(ctx); err == nil {
+		b.username = me.Username
+	} else {
+		log.Warn("telegram: getMe failed; website sign-up can't link Telegram", "err", err)
+	}
+
 	for name, fn := range map[string]func(context.Context, user, string) (reply, error){
-		"start":    func(ctx context.Context, u user, _ string) (reply, error) { return b.cmds.start(ctx, u) },
+		"start":    b.cmds.startWith, // "/start <token>" from the website's deep link
+		"feed":     func(ctx context.Context, u user, _ string) (reply, error) { return b.cmds.feed(ctx, u) },
 		"help":     func(ctx context.Context, u user, _ string) (reply, error) { return b.cmds.help(ctx, u) },
 		"language": func(ctx context.Context, u user, _ string) (reply, error) { return b.cmds.language(ctx, u) },
 		"watch":    func(ctx context.Context, u user, _ string) (reply, error) { return b.cmds.watch(ctx, u) },
@@ -96,9 +109,9 @@ func newBot(a api, st Store, cats []config.Category, log *slog.Logger) *Bot {
 // ctx is cancelled. Long polling needs no public URL, so this works from a
 // laptop.
 func (b *Bot) Run(ctx context.Context) error {
-	for _, lang := range []struct{ code, start, watch, list, stop, language string }{
-		{"", "Start and help", "Choose feeds to watch", "What you're watching", "Stop watching a feed", "Change alert language"},
-		{"hi", "शुरू करें और मदद", "फ़ीड चुनें", "आप किन पर नज़र रख रहे हैं", "किसी फ़ीड को हटाएं", "अलर्ट की भाषा बदलें"},
+	for _, lang := range []struct{ code, start, watch, list, stop, language, feed string }{
+		{"", "Start and help", "Choose feeds to watch", "What you're watching", "Stop watching a feed", "Change alert language", "Open your live feed on the web"},
+		{"hi", "शुरू करें और मदद", "फ़ीड चुनें", "आप किन पर नज़र रख रहे हैं", "किसी फ़ीड को हटाएं", "अलर्ट की भाषा बदलें", "वेब पर अपनी फ़ीड खोलें"},
 	} {
 		_, err := b.tg.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 			LanguageCode: lang.code,
@@ -107,6 +120,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				{Command: "list", Description: lang.list},
 				{Command: "stop", Description: lang.stop},
 				{Command: "language", Description: lang.language},
+				{Command: "feed", Description: lang.feed},
 				{Command: "start", Description: lang.start},
 			},
 		})
@@ -211,6 +225,9 @@ const maxSendAttempts = 4
 
 // maxRetryAfter caps how long one message waits on Telegram's flood control.
 const maxRetryAfter = time.Minute
+
+// Username is the bot's @name without the @ ("" if unknown).
+func (b *Bot) Username() string { return b.username }
 
 // Deliver sends an alert to a Telegram contact. It is how the outbox
 // reaches Telegram; see Send.

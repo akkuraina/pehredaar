@@ -2,12 +2,15 @@ package notifier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
+	"github.com/akkuraina/pehredaar/internal/auth"
 	"github.com/akkuraina/pehredaar/internal/config"
 	"github.com/akkuraina/pehredaar/internal/store"
 )
@@ -21,6 +24,10 @@ type Store interface {
 	Subscribe(ctx context.Context, subscriberID int64, t store.Target) error
 	Unsubscribe(ctx context.Context, subscriberID int64, t store.Target) (bool, error)
 	Subscriptions(ctx context.Context, subscriberID int64) ([]store.Subscription, error)
+	// For linking with the website.
+	LinkTelegram(ctx context.Context, subscriberID, telegramID, chatID int64) error
+	CreateToken(ctx context.Context, t store.Token) error
+	ConsumeToken(ctx context.Context, hash string, purpose store.TokenPurpose, now time.Time) (store.Token, error)
 }
 
 // commands is the bot's logic, separate from the Telegram transport: each
@@ -30,6 +37,8 @@ type commands struct {
 	store  Store
 	cats   []config.Category
 	labels map[string]string // category ID → label
+	site   string            // public website, for /feed links; "" if none
+	now    func() time.Time
 }
 
 func newCommands(st Store, cats []config.Category) *commands {
@@ -37,7 +46,7 @@ func newCommands(st Store, cats []config.Category) *commands {
 	for _, c := range cats {
 		labels[c.ID] = c.Label
 	}
-	return &commands{store: st, cats: cats, labels: labels}
+	return &commands{store: st, cats: cats, labels: labels, now: time.Now}
 }
 
 // user identifies who sent an update. In a private chat the two IDs are
@@ -79,6 +88,65 @@ func (c *commands) start(ctx context.Context, u user) (reply, error) {
 		text: textsFor(sub.Language).help + "\n\n" + chooseLanguage,
 		kb:   languageKeyboard(),
 	}, nil
+}
+
+// startWith handles "/start <token>": the deep link the website shows
+// after the sign-up survey. The token says which web subscriber this
+// Telegram account belongs to.
+func (c *commands) startWith(ctx context.Context, u user, token string) (reply, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return c.start(ctx, u)
+	}
+	t, err := c.store.ConsumeToken(ctx, auth.HashToken(token), store.TokenLinkTelegram, c.now())
+	if errors.Is(err, store.ErrNotFound) {
+		r, err := c.start(ctx, u)
+		r.text = linkExpired + "\n\n" + r.text
+		return r, err
+	}
+	if err != nil {
+		return reply{}, err
+	}
+	if err := c.store.LinkTelegram(ctx, t.SubscriberID, u.telegramID, u.chatID); err != nil {
+		return reply{}, err
+	}
+	sub, err := c.register(ctx, u)
+	if err != nil {
+		return reply{}, err
+	}
+	tx := textsFor(sub.Language)
+	ids, err := c.watchedList(ctx, sub.ID)
+	if err != nil {
+		return reply{}, err
+	}
+	var b strings.Builder
+	b.WriteString(tx.linked)
+	for _, id := range ids {
+		b.WriteString("\n• " + html.EscapeString(c.label(id)))
+	}
+	if len(ids) == 0 {
+		b.WriteString("\n" + tx.linkedNothingLive)
+	}
+	return reply{text: b.String()}, nil
+}
+
+// feed sends a one-time link that signs in to the website.
+func (c *commands) feed(ctx context.Context, u user) (reply, error) {
+	sub, err := c.register(ctx, u)
+	if err != nil {
+		return reply{}, err
+	}
+	t := textsFor(sub.Language)
+	if c.site == "" {
+		return reply{text: t.noSite}, nil
+	}
+	token, hash := auth.NewToken()
+	if err := c.store.CreateToken(ctx, store.Token{
+		Hash: hash, Purpose: store.TokenLogin, SubscriberID: sub.ID, ExpiresAt: c.now().Add(30 * time.Minute),
+	}); err != nil {
+		return reply{}, err
+	}
+	return reply{text: fmt.Sprintf(t.feedLink, html.EscapeString(c.site+"/l/"+token))}, nil
 }
 
 func (c *commands) language(ctx context.Context, u user) (reply, error) {
