@@ -90,7 +90,7 @@ details > summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
   <td>{{.Language}}</td>
   <td><span class="pill s-{{.Status}}">{{.Status}}{{if .ConsecutiveFailures}} ×{{.ConsecutiveFailures}}{{end}}</span></td>
   <td class="nowrap" title="{{stamp .LastCheckedAt}}">{{ago .LastCheckedAt}}</td>
-  <td class="nowrap" title="{{stamp .NextCheckAt}}">{{if .Enabled}}{{until .NextCheckAt}}{{else}}-{{end}}</td>
+  <td class="nowrap" title="{{stamp .NextCheckAt}}">{{if .Enabled}}{{until .NextCheckAt}}{{else}}off: {{or .DisabledReason "disabled"}}{{end}}</td>
   <td class="err">{{short 120 .LastError}}</td>
 </tr>
 {{end}}
