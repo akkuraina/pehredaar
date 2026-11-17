@@ -17,7 +17,7 @@ The Telegram bot is the whole user interface. There is no website or app.
 
 ## What it does today
 
-Status: milestones 1–5 of the [build plan](docs/ARCHITECTURE.md#17-build-milestones)
+Status: milestones 1–6 of the [build plan](docs/ARCHITECTURE.md#17-build-milestones)
 are done. It runs on a developer machine and has not been deployed for the
 public yet.
 
@@ -90,8 +90,9 @@ alerts from both, with summaries written in Hindi.
 - Reading the PDF attached to a *new* notice to summarize it; today a new
   notice's summary is based on its headline and fields.
 - Per-exam subscriptions (e.g. only "CGL 2026"); v1 is per feed.
-- Other exam bodies (UPSC, IBPS, state PSCs).
-- Scheduler hardening (milestone 6).
+- Exam bodies beyond SSC: UPSC/NDA, IBPS, SSB, NTA (JEE, NEET), CBSE,
+  CISCE, CLAT, CAT, GRE, GMAT are planned; state boards and PSCs later
+  ([architecture §19](docs/ARCHITECTURE.md#19-beyond-ssc-decided-2026-11-17-not-built-yet)).
 
 ## Setup
 

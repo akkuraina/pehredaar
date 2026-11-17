@@ -29,6 +29,9 @@ Commands: `/watch`, `/list`, `/stop`.
 ## MVP scope
 
 - One exam family: **SSC** (branch per additional exam family later).
+  Expansion to UPSC/NDA, IBPS, SSB, NTA, CBSE, CISCE, CLAT, CAT, GRE, GMAT
+  decided 2026-11-17; reachability findings and the no-disguise rule for
+  blocked sites are in `docs/ARCHITECTURE.md` §19.
 - 10–20 hand-curated source URLs. No "add any URL" yet; curation allows
   per-site noise rules.
 - Politeness: respect robots.txt, per-host rate limiting, clear User-Agent,

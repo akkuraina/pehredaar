@@ -284,7 +284,7 @@ SSC site itself sends (§2) and verified with `probe` before going in the file.
 
 **Discovery.** Whenever a feed's content changes (and at its baseline), the
 attachments of its current items become `pdf` child sources (same host only, `parent_id` set). They're watched
-on a slower interval (e.g. 6h) and retired after a configurable age (e.g. 120
+on a slower interval (e.g. 6h) and retired after a configurable age (`discovered_retire_after`, default 120
 days) so the watch set doesn't grow forever. This is *not* "add any URL":
 only attachments of curated feeds on the curated host are followed.
 
@@ -505,6 +505,20 @@ any later message to the bot (e.g. `/start`) reactivates them.
 - Everything shares one root `context.Context` from `signal.NotifyContext`.
   Ctrl+C cancels it, workers finish their current item, and `errgroup` waits
   for them, giving a clean shutdown.
+- **Per-check deadline** (2 min) covering rate-limit wait, fetch,
+  `pdftotext` and store writes, so a hung server can't pin a worker. A
+  **panic** inside a check is recovered and recorded as one failed check
+  (with a stack trace in the log) instead of taking down the process.
+- **Catch-up after downtime:** on startup, overdue *discovered* PDFs are
+  given random slots over the next 30 min; curated feeds stay due now, so
+  they aren't queued behind hundreds of PDFs on the same rate-limited host.
+- **Retirement:** hourly, discovered PDFs older than
+  `discovered_retire_after` are disabled (reason `retired`).
+- **Disabled sources are sticky for discovery.** Feeds re-upsert their
+  attachments on every change; a PDF the scheduler disabled (`gone`,
+  `needs-ocr`, `retired`) stays disabled. A curated source re-synced from
+  sources.yaml is re-enabled (restart = retry). Every disabled source
+  keeps a `disabled_reason`, shown on the dashboard.
 - **Jitter:** `next_check_at = now + interval ± 10%`, so sources don't all
   fire on the same tick.
 
@@ -535,9 +549,10 @@ before trusting the pipeline.
 | Timeout, 5xx, connection error | Temporary. Exponential backoff on `next_check_at` (×2, capped at 6h), `consecutive_failures++` |
 | 429 / 503 with `Retry-After` | Honor `Retry-After` (capped) and slow that host's limiter |
 | 403 / suspected block | Treat as temporary with long backoff. Log loudly |
-| 404 / 410 | Permanent after K consecutive failures → disable source, log |
+| 404 / 410 | After 5 consecutive failures (the last a 404/410) → disable, reason `gone`, log. About a day with the 6h backoff |
 | Body is an error page / empty / JSON `statusCode != "200"` | **Not a change.** Counts as a failed check. Never snapshot it (otherwise "page → error → page" alerts twice) |
-| `pdftotext` fails / no text (scanned PDF) | Mark source as `needs-ocr`, skip. No alert |
+| `pdftotext` fails / no text (scanned PDF) | Disable at once, reason `needs-ocr`. No alert |
+| Panic or 2 min deadline exceeded | Failed check, normal backoff |
 | LLM failure | Change stays `pending`, retried. Fallback template after N attempts (§10) |
 | Telegram failure | Delivery is **marked, then sent** (decided 2026-11-02): no user ever gets an alert twice, at the cost of possibly losing one. `Send` retries flood control (429, honoring `retry_after`, capped at 1 min) and network/5xx errors up to 4 attempts; 400s aren't retried. 403 marks the subscriber inactive |
 | Bot off for a while | Changes stay `pending`. On restart, ones older than 72h are closed without alerting, so users aren't flooded with stale news |
@@ -614,7 +629,8 @@ the six feeds in §6; English **and** Hindi.
 | 3 | `differ` + noise layers | Fixture diffs are correct. Pagination churn and whitespace produce no change |
 | 4 | `notifier` + bot | `/watch` `/list` `/stop` work. Templated alerts sent end-to-end |
 | 5 | `summarizer` | LLM summaries + importance. Cosmetic suppressed. Fallback path tested |
-| 6 | `scheduler` hardening | Backoff, discovery/retirement, crash-safety test |
+| 6 | `scheduler` hardening | Backoff, discovery/retirement, crash-safety test. **Done 2026-11-17** |
+| 7 | More exam bodies | See §19 |
 
 ---
 
@@ -636,3 +652,39 @@ operator can watch the pipeline work while it is being built and run.
   so it resets on restart.
 - Server-rendered `html/template` with embedded templates, no JS framework;
   all stored text is auto-escaped.
+
+---
+
+## 19. Beyond SSC (decided 2026-11-17, not built yet)
+
+Target bodies: UPSC (incl. NDA, CDS), IBPS, Services Selection Board
+(officer selection), NTA (JEE Main, NEET), CBSE, CISCE, CLAT (Consortium of
+NLUs), CAT (IIMs), GRE (ETS), GMAT (GMAC). State school boards later.
+
+First reachability check (2026-11-17, from the dev machine, with
+Pehredaar's User-Agent, homepage + robots.txt only):
+
+| Site | Result |
+|---|---|
+| upsc.gov.in, jeemain.nta.nic.in, neet.nta.nic.in, cbse.gov.in | **403 Access Denied** (robots.txt too) |
+| nta.ac.in | 200, server-rendered, ~850 PDF links on the homepage |
+| ibps.in | 200, server-rendered; robots.txt 404 |
+| cisce.org | 200, WordPress; has robots.txt |
+| consortiumofnlus.ac.in | 200, 13 KB page (possibly JS-rendered; check) |
+| iimcat.ac.in | 200, 1.9 KB page (likely a JS shell or redirect; check) |
+| joinindianarmy.nic.in | 200, 10 KB page (possibly JS-rendered; check) |
+| ets.org/gre | 200, server-rendered |
+| mba.com (GMAT) | 200 but a 212-byte body (likely a bot challenge; check) |
+
+**Blocked sites (decided):** we don't disguise the bot. Use official pages
+that allow us instead (e.g. nta.ac.in for JEE/NEET), and skip anything we
+can't reach honestly. Whether the 403s depend on network or IP address is
+still to be checked from a server.
+
+What this needs from the code: an HTML normalizer (goquery, per-source
+`content_selector` / `drop_selectors`, as planned in §8), categories named
+`<body>:<feed>` for each body, and a two-level `/watch` menu (exam body →
+feed) once there are dozens of feeds. Each site gets the SSC treatment
+before it goes in sources.yaml: probe it, save fixtures, and measure noise
+across fetches.
+
