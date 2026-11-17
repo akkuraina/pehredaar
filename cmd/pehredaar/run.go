@@ -47,7 +47,9 @@ func runServe(ctx context.Context, args []string) error {
 	sourcesPath := fs.String("sources", envOr("PEHREDAAR_SOURCES", "sources.yaml"), "curated sources file")
 	addr := fs.String("http", envOr("PEHREDAAR_HTTP", "127.0.0.1:8787"), "dashboard address (localhost only)")
 	workers := fs.Int("workers", envInt("PEHREDAAR_WORKERS", 4), "concurrent checks")
-	public := fs.String("public", envOr("PEHREDAAR_PUBLIC", "127.0.0.1:8788"), "public website address")
+	public := fs.String("public", envOr("PEHREDAAR_PUBLIC", defaultPublic()), "public website address")
+	proxies := fs.String("trusted-proxies", os.Getenv("PEHREDAAR_TRUSTED_PROXIES"),
+		`reverse proxies whose X-Forwarded-For to believe: IPs, CIDRs, or "private"`)
 	baseURL := fs.String("base-url", os.Getenv("PEHREDAAR_BASE_URL"), "the website's public URL, for links in emails and Telegram (default http://<public>)")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pehredaar run [flags]")
@@ -61,6 +63,10 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	if *baseURL == "" {
 		*baseURL = "http://" + *public
+	}
+	trusted, err := web.ParseProxies(*proxies)
+	if err != nil {
+		return err
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -151,7 +157,8 @@ func runServe(ctx context.Context, args []string) error {
 
 	site, err := web.New(web.Config{
 		Store: st, Signer: signer, Categories: sources.Categories(), BaseURL: *baseURL, Logger: log,
-		Mailer: mailerOrNil(mailer),
+		TrustedProxies: trusted,
+		Mailer:         mailerOrNil(mailer),
 		BotUsername: func() string {
 			if tg == nil {
 				return ""
@@ -232,6 +239,16 @@ func requireLoopback(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("-http %q: the dashboard has no login, so it only listens on localhost (e.g. 127.0.0.1:8787)", addr)
+}
+
+// defaultPublic is where the website listens if PEHREDAAR_PUBLIC is unset:
+// on all interfaces at $PORT when a platform (Railway, Render) sets PORT,
+// otherwise on this machine only.
+func defaultPublic() string {
+	if port := os.Getenv("PORT"); port != "" {
+		return "0.0.0.0:" + port
+	}
+	return "127.0.0.1:8788"
 }
 
 // mailerOrNil keeps a nil *email.Sender from becoming a non-nil

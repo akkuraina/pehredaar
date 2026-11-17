@@ -11,11 +11,12 @@ package web
 import (
 	"context"
 	"embed"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -50,7 +51,12 @@ type Config struct {
 	// after it connects.
 	BotUsername func() string
 	BaseURL     string // e.g. https://pehredaar.in, no trailing slash
-	Logger      *slog.Logger
+	// TrustedProxies are the reverse proxies in front of the site (Caddy,
+	// or the hosting platform's router). Only a request arriving from one
+	// of them has its X-Forwarded-For header believed; see clientIP.
+	// Empty: the site is reached directly and the header is ignored.
+	TrustedProxies []netip.Prefix
+	Logger         *slog.Logger
 }
 
 // Server serves the website. Create it with New, run Hub in the
@@ -127,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /account/delete", s.deleteAccount)
 	mux.HandleFunc("GET /privacy", s.privacy)
 	mux.HandleFunc("GET /events", s.events)
+	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("/", s.notFound) // anything else: the owl's 404, not Go's plain one
 
 	// One-click unsubscribe (RFC 8058) is a POST from the mail provider's
@@ -203,7 +210,7 @@ func (s *Server) current(r *http.Request) (store.Subscriber, bool) {
 // forms can't be used to send floods of email.
 func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.limiter.allow(clientIP(r), s.now()) {
+		if !s.limiter.allow(s.clientIP(r), s.now()) {
 			s.render(w, r, http.StatusTooManyRequests, "message", pageData{
 				Title:   "Slow down",
 				Heading: "Whoa, that's a lot of tries 🦉",
@@ -215,15 +222,84 @@ func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// clientIP is the connection's address. Behind a reverse proxy this would
-// be the proxy's; reading X-Forwarded-For safely needs knowing which proxy
-// to trust, which is a deploy-time decision (see README).
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+// clientIP is the visitor's address, for rate limiting.
+//
+// Behind a reverse proxy every connection comes from the proxy, so the
+// limit would be shared by all visitors. Proxies append the address they
+// received from to X-Forwarded-For; but anyone can send that header with
+// made-up entries on the left. So the list is read right to left, skipping
+// our own trusted proxies, and the first address that isn't ours is the
+// visitor: the one entry a trusted proxy wrote that the visitor couldn't
+// forge. A request that didn't come from a trusted proxy is taken at its
+// connection address and its header ignored.
+func (s *Server) clientIP(r *http.Request) string {
+	peer := remoteAddr(r)
+	if !s.trusted(peer) {
+		return peer.String()
 	}
-	return host
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := strings.TrimSpace(hops[i])
+		if hop == "" {
+			continue
+		}
+		ip, err := netip.ParseAddr(hop)
+		if err != nil {
+			break // garbage: fall back to the proxy's own address
+		}
+		ip = ip.Unmap()
+		if !s.trusted(ip) {
+			return ip.String()
+		}
+	}
+	return peer.String()
+}
+
+func (s *Server) trusted(ip netip.Addr) bool {
+	for _, p := range s.cfg.TrustedProxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func remoteAddr(r *http.Request) netip.Addr {
+	ap, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return netip.Addr{} // the zero Addr is never trusted
+	}
+	return ap.Addr().Unmap()
+}
+
+// ParseProxies parses a comma-separated list of IPs and CIDR ranges, as in
+// PEHREDAAR_TRUSTED_PROXIES. The word "private" stands for the loopback
+// and private ranges, where platform routers and a local Caddy live.
+func ParseProxies(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for part := range strings.SplitSeq(s, ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case part == "":
+		case part == "private":
+			for _, c := range []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "100.64.0.0/10"} {
+				out = append(out, netip.MustParsePrefix(c))
+			}
+		case strings.Contains(part, "/"):
+			p, err := netip.ParsePrefix(part)
+			if err != nil {
+				return nil, fmt.Errorf("trusted proxy %q: %w", part, err)
+			}
+			out = append(out, p.Masked())
+		default:
+			ip, err := netip.ParseAddr(part)
+			if err != nil {
+				return nil, fmt.Errorf("trusted proxy %q: %w", part, err)
+			}
+			out = append(out, netip.PrefixFrom(ip, ip.BitLen()))
+		}
+	}
+	return out, nil
 }
 
 // ipLimiter allows n events per window per IP (a fixed window: simple and
@@ -261,4 +337,22 @@ func (l *ipLimiter) allow(ip string, now time.Time) bool {
 	}
 	b.count++
 	return b.count <= l.n
+}
+
+// healthz is for the hosting platform's health checks: 200 while the
+// process is up and the database answers, 503 otherwise, so a hung or
+// broken instance gets restarted. A government site being down is not
+// our ill health, so source checks don't count here.
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if err := s.st.Ping(ctx); err != nil {
+		s.log.Error("web: health check: database", "err", err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("database unavailable\n"))
+		return
+	}
+	w.Write([]byte("ok\n"))
 }

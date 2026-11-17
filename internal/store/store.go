@@ -381,5 +381,8 @@ type Store interface {
 	// when it returns true.
 	MarkDelivered(ctx context.Context, changeID, contactID int64) (bool, error)
 
+	// Ping checks that the database answers a query (health checks).
+	Ping(ctx context.Context) error
+
 	Close() error
 }

@@ -66,6 +66,13 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return s, nil
 }
 
+// Ping runs a trivial query. PingContext alone only checks a connection
+// can be opened; a query also proves the file is readable.
+func (s *Store) Ping(ctx context.Context) error {
+	var one int
+	return s.db.QueryRowContext(ctx, `SELECT 1`).Scan(&one)
+}
+
 // Close closes the underlying connection pool.
 func (s *Store) Close() error { return s.db.Close() }
 
