@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -48,6 +49,10 @@ func runProbe(ctx context.Context, args []string) error {
 	fs.StringVar(&page.Title, "title", "", "with -items: headline selector inside an item")
 	fs.StringVar(&page.Date, "date", "", "with -items: date selector inside an item")
 	fs.StringVar(&page.Key, "key", "", "with -items: what identifies a notice, link (default) or title")
+	linkDate := fs.String("link-date", "", "with -items: regex whose first group captures YYYYMMDD[hhmm[ss]] from the item's link")
+	include := fs.String("include", "", "with -items: keep notices whose headline matches this regex")
+	exclude := fs.String("exclude", "", "with -items: drop notices whose headline matches this regex")
+	fs.IntVar(&page.MaxItems, "max-items", 0, "with -items: keep the newest N notices")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pehredaar probe [flags] <url>")
 		fs.PrintDefaults()
@@ -62,12 +67,24 @@ func runProbe(ctx context.Context, args []string) error {
 	url := fs.Arg(0)
 
 	page.Drop = drop
+	for _, re := range []struct {
+		pat string
+		dst **regexp.Regexp
+	}{{*linkDate, &page.LinkDate}, {*include, &page.Include}, {*exclude, &page.Exclude}} {
+		if re.pat != "" {
+			c, err := regexp.Compile(re.pat)
+			if err != nil {
+				return err
+			}
+			*re.dst = c
+		}
+	}
 	rules := normalize.Rules{HTML: page}
 	if page.Items != "" {
 		// A notice list is a feed in html format, exactly as sources.yaml
 		// would say "kind: feed, format: html".
 		*kind, rules.Format = string(store.KindFeed), normalize.FormatHTML
-		if *windowed && page.Date == "" {
+		if *windowed && !page.Dated() {
 			*windowed = false // no dates, no way to tell scrolling from removal
 		}
 	}

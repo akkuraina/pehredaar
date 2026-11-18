@@ -233,7 +233,9 @@ func TestParseDate(t *testing.T) {
 		"13/13/2026":         "",
 		"no date here":       "",
 		"Session 2, 2026":    "",
-		"12/11/26":           "", // two-digit years are ambiguous; not guessed
+		"12/11/26":           "",           // two-digit years are ambiguous; not guessed
+		"01 Jul 26":          "2026-07-01", // ...unless a month name makes them clear (IBPS)
+		"30 Jun 26":          "2026-06-30",
 		"published 1/1/1890": "",
 	}
 	for in, want := range cases {
@@ -257,6 +259,9 @@ func TestHTMLRulesValidate(t *testing.T) {
 		"bad selector":       {HTMLRules{Items: "li[", Title: "a"}, true},
 		"bad drop":           {HTMLRules{Drop: []string{">>"}}, false},
 		"unknown key":        {HTMLRules{Items: "li", Key: "id"}, true},
+		"link_date no group": {HTMLRules{Items: "li", LinkDate: regexp.MustCompile(`\d{8}`)}, true},
+		"max_items undated":  {HTMLRules{Items: "li", MaxItems: 10}, true},
+		"filter on a page":   {HTMLRules{Include: regexp.MustCompile(`JEE`)}, false},
 	}
 	for name, c := range bad {
 		if err := c.r.Validate(c.list); err == nil {
@@ -265,6 +270,23 @@ func TestHTMLRulesValidate(t *testing.T) {
 	}
 	if err := tableRules.HTML.Validate(true); err != nil {
 		t.Errorf("valid rules rejected: %v", err)
+	}
+}
+
+func TestLinkDate(t *testing.T) {
+	re := regexp.MustCompile(`(?i)Notice_(\d{8,14})\.pdf`)
+	cases := map[string]string{
+		"https://x.test/Download/Notice/Notice_20261117205801.pdf": "2026-11-17T20:58:01+05:30",
+		"https://x.test/Download/Notice/Notice_20261117.PDF":       "2026-11-17T00:00:00+05:30",
+		"https://x.test/Download/Notice/Notice_20261340000000.pdf": "", // month 13
+		"https://x.test/Download/Notice/Notice_2026111720.pdf":     "", // 10 digits: no layout
+		"https://x.test/other.pdf":                                 "",
+	}
+	for link, want := range cases {
+		it := FeedItem{Attachments: []Attachment{{URL: link}}}
+		if got := linkDate(it, re); got != want {
+			t.Errorf("linkDate(%s) = %q, want %q", link, got, want)
+		}
 	}
 }
 

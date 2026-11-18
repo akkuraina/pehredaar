@@ -106,6 +106,11 @@ type sourceYAML struct {
 	Title   string   `yaml:"title"`   // format html: headline inside an item
 	Date    string   `yaml:"date"`    // format html: date inside an item
 	Key     string   `yaml:"key"`     // format html: link (default) or title
+
+	LinkDate string `yaml:"link_date"` // format html: regex, date digits from the link
+	Include  string `yaml:"include"`   // format html: keep headlines matching this regex
+	Exclude  string `yaml:"exclude"`   // format html: drop headlines matching this regex
+	MaxItems int    `yaml:"max_items"` // format html: keep the newest N
 }
 
 // Placeholders in source URLs.
@@ -324,6 +329,20 @@ func pageRules(y sourceYAML, kind store.Kind, rules *normalize.Rules) error {
 	r := normalize.HTMLRules{
 		Content: y.Content, Drop: y.Drop,
 		Items: y.Items, Title: y.Title, Date: y.Date, Key: y.Key,
+		MaxItems: y.MaxItems,
+	}
+	for name, re := range map[string]struct {
+		pat string
+		dst **regexp.Regexp
+	}{"link_date": {y.LinkDate, &r.LinkDate}, "include": {y.Include, &r.Include}, "exclude": {y.Exclude, &r.Exclude}} {
+		if re.pat == "" {
+			continue
+		}
+		c, err := regexp.Compile(re.pat)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		*re.dst = c
 	}
 	list := kind == store.KindFeed && y.Format == normalize.FormatHTML
 	switch {
@@ -333,9 +352,13 @@ func pageRules(y sourceYAML, kind store.Kind, rules *normalize.Rules) error {
 		return fmt.Errorf("format %q must be ssc or html", y.Format)
 	case !list && kind != store.KindHTML && (y.Content != "" || len(y.Drop) > 0 || y.Items != ""):
 		return errors.New("content, drop and items only apply to html pages and format: html feeds")
-	case list && y.Windowed && y.Date == "":
+	case list && y.Windowed && !r.Dated():
 		// The differ tells "scrolled off the page" from "removed" by date.
-		return errors.New("a windowed format: html feed needs a date selector")
+		return errors.New("a windowed format: html feed needs date or link_date")
+	case list && r.MaxItems > 0 && !y.Windowed:
+		// Capped, the newest notice pushes the oldest out: without windowed
+		// that would alert as a removal every time.
+		return errors.New("a format: html feed with max_items must be windowed")
 	}
 	if err := r.Validate(list); err != nil {
 		return err

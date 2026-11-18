@@ -60,6 +60,22 @@ type HTMLRules struct {
 	// default) or "title". With "link", a reworded headline is an edit of
 	// the same notice; with "title", a replaced PDF is.
 	Key string
+
+	// LinkDate reads the date from the item's first link when the page
+	// shows none, e.g. NTA's "Notice_20261117205801.pdf". Its first group
+	// must capture YYYYMMDD, optionally followed by hhmm or hhmmss (IST).
+	// A Date element, when set and parseable, wins.
+	LinkDate *regexp.Regexp
+
+	// Include and Exclude filter items by headline: one page often lists
+	// notices for many exams (NTA lists JEE, NEET, CUET, NCHM-JEE...).
+	Include, Exclude *regexp.Regexp
+
+	// MaxItems keeps only the newest N items (0: all). Pages that list
+	// their whole history would otherwise make every old PDF a watched
+	// source. Needs dates, so "newest" means something; such a list is
+	// then a window and should be marked windowed.
+	MaxItems int
 }
 
 // Item keys.
@@ -86,13 +102,23 @@ func (r HTMLRules) Validate(list bool) error {
 	switch {
 	case list && r.Items == "":
 		return errors.New("a format: html feed needs an items selector")
-	case !list && (r.Items != "" || r.Title != "" || r.Date != "" || r.Key != ""):
-		return errors.New("items, title, date and key only apply to format: html feeds")
+	case !list && (r.Items != "" || r.Title != "" || r.Date != "" || r.Key != "" ||
+		r.LinkDate != nil || r.Include != nil || r.Exclude != nil || r.MaxItems != 0):
+		return errors.New("items, title, date, key, link_date, include, exclude and max_items only apply to format: html feeds")
 	case r.Key != "" && r.Key != KeyLink && r.Key != KeyTitle:
 		return fmt.Errorf("key %q must be %s or %s", r.Key, KeyLink, KeyTitle)
+	case r.LinkDate != nil && r.LinkDate.NumSubexp() < 1:
+		return errors.New("link_date needs a group capturing the date digits, e.g. Notice_(\\d{14})")
+	case r.MaxItems < 0:
+		return errors.New("max_items can't be negative")
+	case r.MaxItems > 0 && !r.Dated():
+		return errors.New("max_items needs a date or link_date, to know which items are newest")
 	}
 	return nil
 }
+
+// Dated reports whether items get dates, which windowed lists need.
+func (r HTMLRules) Dated() bool { return r.Date != "" || r.LinkDate != nil }
 
 // parseHTML reads body (in whatever charset it declares; many government
 // sites still serve windows-1252 or declare it in a meta tag) and returns
@@ -187,6 +213,7 @@ func normalizeHTMLList(body []byte, pageURL string, rules Rules) (Doc, error) {
 		key string
 	}
 	var raws []raw
+	found := 0 // notices on the page, before filtering
 	area.Find(r.Items).Each(func(_ int, s *goquery.Selection) {
 		it := FeedItem{}
 		if r.Date != "" {
@@ -213,10 +240,24 @@ func normalizeHTMLList(body []byte, pageURL string, rules Rules) (Doc, error) {
 			// item after the file so the alert still says something.
 			it.Headline = firstLinkName(it)
 		}
+		found++
+		if (r.Include != nil && !r.Include.MatchString(it.Headline)) ||
+			(r.Exclude != nil && r.Exclude.MatchString(it.Headline)) {
+			return
+		}
+		if it.CreatedAt == "" && r.LinkDate != nil {
+			it.CreatedAt = linkDate(it, r.LinkDate)
+		}
 		raws = append(raws, raw{it: it, key: itemKey(it, r.Key)})
 	})
-	if len(raws) == 0 {
+	if found == 0 {
 		return Doc{}, fmt.Errorf("%w: items selector %q matches no notices", ErrNotContent, r.Items)
+	}
+	if len(raws) == 0 {
+		// The page is fine but nothing passes the filter. For a curated
+		// source that is a redesign (or a renamed exam), not "every notice
+		// withdrawn"; storing it would turn the recovery into an alert.
+		return Doc{}, fmt.Errorf("%w: none of %d notices passes the include/exclude filter", ErrNotContent, found)
 	}
 
 	// Two notices can share a key (both link to the same "apply online"
@@ -246,6 +287,9 @@ func normalizeHTMLList(body []byte, pageURL string, rules Rules) (Doc, error) {
 	// order among equal (or missing) dates, so the result depends only on
 	// the page, never on map iteration or parser internals.
 	slices.SortStableFunc(items, func(a, b FeedItem) int { return cmp.Compare(b.CreatedAt, a.CreatedAt) })
+	if r.MaxItems > 0 && len(items) > r.MaxItems {
+		items = items[:r.MaxItems]
+	}
 
 	lines := make([]string, 0, len(items))
 	for _, it := range items {
@@ -259,7 +303,8 @@ func normalizeHTMLList(body []byte, pageURL string, rules Rules) (Doc, error) {
 // watches them and alerts link them as documents), anything else as links.
 func addLinks(it *FeedItem, s *goquery.Selection, base *url.URL) {
 	seen := map[string]bool{}
-	s.Find("a[href]").Each(func(_ int, a *goquery.Selection) {
+	// The item itself may be the link (<a href><div>date</div>...</a>).
+	s.Filter("a[href]").AddSelection(s.Find("a[href]")).Each(func(_ int, a *goquery.Selection) {
 		href, _ := a.Attr("href")
 		u, ok := resolve(base, href)
 		if !ok || seen[u] {
@@ -388,10 +433,12 @@ var blockElements = map[string]bool{
 // Indian sites write dates day first: 05/11/2026, 05-11-2026, 05.11.2026,
 // 5 Nov 2026, 05-Nov-2026, 5th November, 2026. ISO 2026-11-05 also
 // appears. Month-first (US) order is never assumed: 05/11 is 5 November.
+// A two-digit year is accepted only after a month name ("01 Jul 26", as
+// IBPS writes it), where it can't be mistaken for a day or month.
 var (
 	dmyNumRE  = regexp.MustCompile(`\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b`)
 	isoRE     = regexp.MustCompile(`\b(\d{4})-(\d{2})-(\d{2})\b`)
-	dmyNameRE = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)?[\s./-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,./-]*(\d{4})\b`)
+	dmyNameRE = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)?[\s./-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,./-]*(\d{4}|\d{2})\b`)
 	mdyNameRE = regexp.MustCompile(`(?i)\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b`)
 )
 
@@ -418,6 +465,9 @@ func ParseDate(s string) string {
 	case dmyNameRE.MatchString(s):
 		g := dmyNameRE.FindStringSubmatch(s)
 		d, m, y = atoi(g[1]), int(months[strings.ToLower(g[2])]), atoi(g[3])
+		if len(g[3]) == 2 {
+			y += 2000
+		}
 	case mdyNameRE.MatchString(s):
 		g := mdyNameRE.FindStringSubmatch(s)
 		m, d, y = int(months[strings.ToLower(g[1])]), atoi(g[2]), atoi(g[3])
@@ -428,6 +478,32 @@ func ParseDate(s string) string {
 	// time.Date normalizes 31/02 into March; a date that doesn't survive
 	// the round trip wasn't a date.
 	if t.Day() != d || int(t.Month()) != m || y < 1990 || y > 2100 {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+// linkDate applies re to the item's first link. The captured digits are
+// YYYYMMDD, YYYYMMDDhhmm or YYYYMMDDhhmmss, read as IST.
+func linkDate(it FeedItem, re *regexp.Regexp) string {
+	link := ""
+	if len(it.Attachments) > 0 {
+		link = it.Attachments[0].URL
+	} else if len(it.Links) > 0 {
+		link = it.Links[0]
+	}
+	m := re.FindStringSubmatch(link)
+	if m == nil {
+		return ""
+	}
+	digits := m[1]
+	layouts := map[int]string{8: "20060102", 12: "200601021504", 14: "20060102150405"}
+	layout, ok := layouts[len(digits)]
+	if !ok {
+		return ""
+	}
+	t, err := time.ParseInLocation(layout, digits, istZone)
+	if err != nil || t.Year() < 1990 || t.Year() > 2100 {
 		return ""
 	}
 	return t.Format(time.RFC3339)
