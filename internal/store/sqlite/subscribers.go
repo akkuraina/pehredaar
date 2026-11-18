@@ -215,6 +215,9 @@ func mergeSubscriber(ctx context.Context, tx *sql.Tx, from, into int64) error {
 		`INSERT INTO interests (subscriber_id, exam, created_at)
 		 SELECT ?2, exam, created_at FROM interests WHERE subscriber_id = ?1
 		 ON CONFLICT DO NOTHING`,
+		`INSERT INTO launch_notices (subscriber_id, exam, sent_at)
+		 SELECT ?2, exam, sent_at FROM launch_notices WHERE subscriber_id = ?1
+		 ON CONFLICT DO NOTHING`,
 		// Cascades to the old subscriptions, interests and tokens.
 		`DELETE FROM subscribers WHERE id = ?1`,
 	}
@@ -336,9 +339,36 @@ func (s *Store) Subscriptions(ctx context.Context, subscriberID int64) ([]store.
 
 func (s *Store) SetInterests(ctx context.Context, subscriberID int64, exams []string) error {
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM interests WHERE subscriber_id = ?`, subscriberID); err != nil {
+		// Delete only the exams dropped from the list: a kept exam keeps
+		// its created_at, which decides whether its launch is news to them.
+		keep := make(map[string]bool, len(exams))
+		for _, e := range exams {
+			keep[e] = true
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT exam FROM interests WHERE subscriber_id = ?`, subscriberID)
+		if err != nil {
 			return err
+		}
+		var drop []string
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				rows.Close()
+				return err
+			}
+			if !keep[e] {
+				drop = append(drop, e)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, e := range drop {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM interests WHERE subscriber_id = ? AND exam = ?`, subscriberID, e); err != nil {
+				return err
+			}
 		}
 		now := toMillis(s.now())
 		for _, e := range exams {
@@ -456,4 +486,62 @@ func (s *Store) Setting(ctx context.Context, key, init string) (string, error) {
 		return "", fmt.Errorf("sqlite: setting %s: %w", key, err)
 	}
 	return v, nil
+}
+
+// --- exam launches --------------------------------------------------------------
+
+func (s *Store) ExamLive(ctx context.Context, exam string, now time.Time) (time.Time, error) {
+	// INSERT ... ON CONFLICT DO NOTHING, then read: concurrent callers all
+	// see the first recorded time.
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO exam_launches (exam, live_at) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+		exam, now.UnixMilli()); err != nil {
+		return time.Time{}, fmt.Errorf("sqlite: exam %s live: %w", exam, err)
+	}
+	var ms int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT live_at FROM exam_launches WHERE exam = ?`, exam).Scan(&ms); err != nil {
+		return time.Time{}, fmt.Errorf("sqlite: exam %s live: %w", exam, err)
+	}
+	return time.UnixMilli(ms), nil
+}
+
+func (s *Store) LaunchCandidates(ctx context.Context, exam string, liveAt time.Time, categoryPrefix string) ([]int64, error) {
+	// LIKE treats % and _ as wildcards; escape them so the prefix is
+	// matched literally.
+	like := strings.NewReplacer(`\`, `\`, `%`, `\%`, `_`, `\_`).Replace(categoryPrefix) + "%"
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT i.subscriber_id FROM interests i
+		WHERE i.exam = ? AND i.created_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM launch_notices n
+		                  WHERE n.subscriber_id = i.subscriber_id AND n.exam = i.exam)
+		  AND NOT EXISTS (SELECT 1 FROM subscriptions su
+		                  WHERE su.subscriber_id = i.subscriber_id AND su.category LIKE ? ESCAPE '\')
+		  AND EXISTS (SELECT 1 FROM contacts c
+		              WHERE c.subscriber_id = i.subscriber_id AND c.verified_at IS NOT NULL AND c.active = 1)
+		ORDER BY i.subscriber_id`, exam, liveAt.UnixMilli(), like)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: launch candidates for %s: %w", exam, err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) MarkLaunchNotice(ctx context.Context, subscriberID int64, exam string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO launch_notices (subscriber_id, exam, sent_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+		subscriberID, exam, toMillis(s.now()))
+	if err != nil {
+		return false, fmt.Errorf("sqlite: mark launch notice %d/%s: %w", subscriberID, exam, err)
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }

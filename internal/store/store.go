@@ -355,9 +355,25 @@ type Store interface {
 	// Unsubscribe reports whether a subscription was actually removed.
 	Unsubscribe(ctx context.Context, subscriberID int64, t Target) (bool, error)
 	Subscriptions(ctx context.Context, subscriberID int64) ([]Subscription, error)
-	// SetInterests replaces the exams a subscriber wants watched.
+	// SetInterests replaces the exams a subscriber wants watched. Exams
+	// kept from before keep their original created_at.
 	SetInterests(ctx context.Context, subscriberID int64, exams []string) error
 	Interests(ctx context.Context, subscriberID int64) ([]string, error)
+	// Telling people when an exam they asked about goes live.
+
+	// ExamLive records that exam is live as of now, unless it already was,
+	// and returns when it first went live.
+	ExamLive(ctx context.Context, exam string, now time.Time) (time.Time, error)
+	// LaunchCandidates returns, in id order, the subscribers who chose
+	// exam before liveAt, have a verified active contact, haven't been
+	// told yet, and don't already subscribe to any category starting
+	// with categoryPrefix.
+	LaunchCandidates(ctx context.Context, exam string, liveAt time.Time, categoryPrefix string) ([]int64, error)
+	// MarkLaunchNotice records that the subscriber was told about exam. It
+	// returns false if that was already recorded, so callers send only
+	// when it returns true.
+	MarkLaunchNotice(ctx context.Context, subscriberID int64, exam string) (bool, error)
+
 	// RecipientsFor returns the verified, active contacts of subscribers
 	// whose subscriptions cover src: its category, the source itself, or
 	// (for discovered PDFs) its parent. Language routing is the caller's job.

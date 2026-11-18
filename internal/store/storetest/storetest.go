@@ -48,6 +48,8 @@ func Run(t *testing.T, open Opener) {
 		{"EmailContacts", testEmailContacts},
 		{"LinkTelegramMerges", testLinkTelegramMerges},
 		{"Interests", testInterests},
+		{"InterestsKeepCreatedAt", testInterestsKeepCreatedAt},
+		{"Launches", testLaunches},
 		{"DeleteSubscriber", testDeleteSubscriber},
 		{"Tokens", testTokens},
 		{"Setting", testSetting},
@@ -1015,5 +1017,92 @@ func testDeleteSubscriber(t *testing.T, s store.Store) {
 	again, _ := s.CreateSubscriber(ctx(t), store.LangEnglish)
 	if c2, err := s.AddEmail(ctx(t), again.ID, "del@example.test"); err != nil || c2.SubscriberID != again.ID {
 		t.Errorf("re-adding a deleted address = %+v, %v", c2, err)
+	}
+}
+
+// A kept interest keeps its age; launch notices depend on it.
+func testInterestsKeepCreatedAt(t *testing.T, s store.Store) {
+	sub := mustSubscriber(t, s, 501)
+	if err := s.SetInterests(ctx(t), sub.ID, []string{"jee"}); err != nil {
+		t.Fatal(err)
+	}
+	liveAt := time.Now().Add(time.Hour) // jee went live after they chose it
+	if _, err := s.ExamLive(ctx(t), "jee", liveAt); err != nil {
+		t.Fatal(err)
+	}
+	// Re-saving the survey (adding neet) must not make "jee" look new.
+	if err := s.SetInterests(ctx(t), sub.ID, []string{"neet", "jee"}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.LaunchCandidates(ctx(t), "jee", liveAt, "jee:")
+	if err != nil || len(ids) != 1 {
+		t.Errorf("candidates after re-save = %v, %v; want the subscriber", ids, err)
+	}
+}
+
+func testLaunches(t *testing.T, s store.Store) {
+	now := time.Now()
+	// SSC is seeded as live from the start.
+	if at, err := s.ExamLive(ctx(t), "ssc", now); err != nil || !at.Before(now.Add(-24*time.Hour)) {
+		t.Errorf("ssc live at %v, %v; want the seeded zero time", at, err)
+	}
+	// The first call records the time; later calls return it unchanged.
+	first, err := s.ExamLive(ctx(t), "jee", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.ExamLive(ctx(t), "jee", now.Add(time.Hour)); !again.Equal(first) {
+		t.Errorf("ExamLive moved from %v to %v", first, again)
+	}
+
+	asked := mustSubscriber(t, s, 601) // chose jee, verified Telegram: told
+	watching := mustSubscriber(t, s, 602)
+	unverified, _ := s.CreateSubscriber(ctx(t), store.LangEnglish) // email never confirmed
+	if _, err := s.AddEmail(ctx(t), unverified.ID, "u@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	blocked := mustSubscriber(t, s, 603)
+	if err := s.SetContactActive(ctx(t), telegramContact(t, s, 603).ID, false); err != nil {
+		t.Fatal(err)
+	}
+	other := mustSubscriber(t, s, 604) // chose neet only
+	for _, sub := range []store.Subscriber{asked, watching, unverified, blocked} {
+		if err := s.SetInterests(ctx(t), sub.ID, []string{"jee", "ssc"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetInterests(ctx(t), other.ID, []string{"neet"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Subscribe(ctx(t), watching.ID, store.Target{Category: "jee:nta-notices"}); err != nil {
+		t.Fatal(err)
+	}
+
+	later := now.Add(time.Minute) // interests above were chosen before this
+	ids, err := s.LaunchCandidates(ctx(t), "jee", later, "jee:")
+	if err != nil || !equalInts(ids, []int64{asked.ID}) {
+		t.Errorf("candidates = %v, %v; want only %d", ids, err, asked.ID)
+	}
+	// Interests chosen after the launch were handled by the survey.
+	if ids, _ := s.LaunchCandidates(ctx(t), "jee", now.Add(-time.Hour), "jee:"); len(ids) != 0 {
+		t.Errorf("candidates for an earlier launch = %v, want none", ids)
+	}
+	// A literal prefix: "jee_" must not match "jee:" or "jeex".
+	if ids, _ := s.LaunchCandidates(ctx(t), "jee", later, "jee_"); len(ids) != 2 {
+		t.Errorf("candidates with an unrelated prefix = %v, want asked and watching", ids)
+	}
+
+	if ok, err := s.MarkLaunchNotice(ctx(t), asked.ID, "jee"); !ok || err != nil {
+		t.Fatalf("first mark = %v, %v", ok, err)
+	}
+	if ok, _ := s.MarkLaunchNotice(ctx(t), asked.ID, "jee"); ok {
+		t.Error("second mark returned true")
+	}
+	if ids, _ := s.LaunchCandidates(ctx(t), "jee", later, "jee:"); len(ids) != 0 {
+		t.Errorf("candidates after marking = %v, want none", ids)
+	}
+	// Deleting the person removes their notices too (no FK error).
+	if err := s.DeleteSubscriber(ctx(t), asked.ID); err != nil {
+		t.Fatal(err)
 	}
 }
