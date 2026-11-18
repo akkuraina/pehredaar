@@ -150,13 +150,14 @@ func (s *Server) Handler() http.Handler {
 }
 
 // securityHeaders sets headers every response should carry. The CSP
-// allows only our own scripts and styles plus Google Fonts.
+// allows only our own scripts and styles plus Google Fonts, and lets
+// only our own pages and the author's portfolio embed us in a frame.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", "default-src 'self'; "+
 			"style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "+
-			"img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+			"img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://akanksharaina.vercel.app; base-uri 'none'; form-action 'self'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
