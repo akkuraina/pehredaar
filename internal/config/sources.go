@@ -97,6 +97,15 @@ type sourceYAML struct {
 	Windowed            bool     `yaml:"windowed"`
 	DiscoverAttachments bool     `yaml:"discover_attachments"`
 	DropLines           []string `yaml:"drop_lines"`
+
+	// The page reader (see normalize.HTMLRules).
+	Format  string   `yaml:"format"`  // feeds: ssc (default) or html
+	Content string   `yaml:"content"` // CSS selector of the part to read
+	Drop    []string `yaml:"drop"`    // CSS selectors removed first
+	Items   string   `yaml:"items"`   // format html: one element per notice
+	Title   string   `yaml:"title"`   // format html: headline inside an item
+	Date    string   `yaml:"date"`    // format html: date inside an item
+	Key     string   `yaml:"key"`     // format html: link (default) or title
 }
 
 // Placeholders in source URLs.
@@ -202,6 +211,9 @@ func expand(y sourceYAML, now time.Time) ([]Source, error) {
 		}
 		rules.DropLines = append(rules.DropLines, re)
 	}
+	if err := pageRules(y, kind, &rules); err != nil {
+		return nil, err
+	}
 	enabled := y.Enabled == nil || *y.Enabled
 
 	var out []Source
@@ -303,4 +315,31 @@ func Sync(ctx context.Context, st store.Store, s Sources) (int64, error) {
 		urls = append(urls, src.URL)
 	}
 	return st.DisableCuratedExcept(ctx, urls)
+}
+
+// pageRules validates and fills the page-reader settings. They are only
+// accepted where they're used, so a misplaced key is an error rather than
+// a setting that silently does nothing.
+func pageRules(y sourceYAML, kind store.Kind, rules *normalize.Rules) error {
+	r := normalize.HTMLRules{
+		Content: y.Content, Drop: y.Drop,
+		Items: y.Items, Title: y.Title, Date: y.Date, Key: y.Key,
+	}
+	list := kind == store.KindFeed && y.Format == normalize.FormatHTML
+	switch {
+	case y.Format != "" && kind != store.KindFeed:
+		return errors.New("format only applies to feeds")
+	case y.Format != "" && y.Format != normalize.FormatSSC && y.Format != normalize.FormatHTML:
+		return fmt.Errorf("format %q must be ssc or html", y.Format)
+	case !list && kind != store.KindHTML && (y.Content != "" || len(y.Drop) > 0 || y.Items != ""):
+		return errors.New("content, drop and items only apply to html pages and format: html feeds")
+	case list && y.Windowed && y.Date == "":
+		// The differ tells "scrolled off the page" from "removed" by date.
+		return errors.New("a windowed format: html feed needs a date selector")
+	}
+	if err := r.Validate(list); err != nil {
+		return err
+	}
+	rules.Format, rules.HTML = y.Format, r
+	return nil
 }

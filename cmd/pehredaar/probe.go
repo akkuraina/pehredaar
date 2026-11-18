@@ -22,16 +22,32 @@ type probe struct {
 	f       *fetcher.Fetcher
 	n       *normalize.Normalizer
 	preview int // lines of canonical text to print; 0 = all
+	rules   normalize.Rules
 }
+
+// multiFlag collects a repeatable string flag (-drop a -drop b). CSS
+// selectors contain commas, so a comma-separated list wouldn't work.
+type multiFlag []string
+
+func (m *multiFlag) String() string     { return strings.Join(*m, " ; ") }
+func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func runProbe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("probe", flag.ContinueOnError)
-	kind := fs.String("kind", "auto", "source kind: auto, feed or pdf")
+	kind := fs.String("kind", "auto", "source kind: auto, feed, pdf or html")
 	again := fs.Duration("again", 0, "fetch a second time after this delay and compare (e.g. 5m)")
 	attachments := fs.Int("attachments", 0, "for feeds: also probe the first N attachment PDFs")
 	lines := fs.Int("lines", 15, "lines of canonical text to show (0 = all)")
 	gap := fs.Duration("gap", 3*time.Second, "minimum delay between requests to one host")
 	windowed := fs.Bool("windowed", true, "for feeds: the URL returns one page of a longer list (false for the calendar)")
+	var page normalize.HTMLRules
+	fs.StringVar(&page.Content, "content", "", "web pages: CSS selector of the part to read (default body)")
+	var drop multiFlag
+	fs.Var(&drop, "drop", "web pages: CSS selector to remove first (repeatable)")
+	fs.StringVar(&page.Items, "items", "", "read a web page as a notice list: CSS selector matching one element per notice")
+	fs.StringVar(&page.Title, "title", "", "with -items: headline selector inside an item")
+	fs.StringVar(&page.Date, "date", "", "with -items: date selector inside an item")
+	fs.StringVar(&page.Key, "key", "", "with -items: what identifies a notice, link (default) or title")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pehredaar probe [flags] <url>")
 		fs.PrintDefaults()
@@ -45,10 +61,25 @@ func runProbe(ctx context.Context, args []string) error {
 	}
 	url := fs.Arg(0)
 
+	page.Drop = drop
+	rules := normalize.Rules{HTML: page}
+	if page.Items != "" {
+		// A notice list is a feed in html format, exactly as sources.yaml
+		// would say "kind: feed, format: html".
+		*kind, rules.Format = string(store.KindFeed), normalize.FormatHTML
+		if *windowed && page.Date == "" {
+			*windowed = false // no dates, no way to tell scrolling from removal
+		}
+	}
+	if err := page.Validate(page.Items != ""); err != nil {
+		return err
+	}
+
 	p := &probe{
 		f:       fetcher.New(fetcher.Config{HostInterval: *gap}),
 		n:       normalize.New(),
 		preview: *lines,
+		rules:   rules,
 	}
 
 	first, err := p.once(ctx, url, store.Kind(*kind), fetcher.Request{URL: url})
@@ -104,7 +135,11 @@ func (p *probe) once(ctx context.Context, url string, kind store.Kind, req fetch
 	if kind == "auto" {
 		kind = detectKind(resp)
 	}
-	doc, err := p.n.Normalize(ctx, store.Source{URL: url, Kind: kind}, resp.Body, normalize.Rules{})
+	rules := p.rules
+	if kind == store.KindPDF {
+		rules = normalize.Rules{} // attachments of a page-read feed
+	}
+	doc, err := p.n.Normalize(ctx, store.Source{URL: url, Kind: kind}, resp.Body, rules)
 	if err != nil {
 		return probeResult{}, fmt.Errorf("normalize as %s: %w", kind, err)
 	}

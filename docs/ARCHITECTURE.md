@@ -359,9 +359,9 @@ the LLM is down, the change stays `pending` and is retried. Combined with
 
 Noise filtering is applied in layers. Each layer is cheap and testable against fixtures.
 
-| Layer | Feed (JSON) | PDF | HTML (future) |
+| Layer | Feed (JSON) | PDF | HTML (page reader) |
 |---|---|---|---|
-| 1. Extract | Parse JSON, keep only `keep_fields` per item (drops `isCache`, pagination, etc.) | `pdftotext -layout -enc UTF-8` (temp file, timeout, size cap) | goquery: keep `content_selector`, drop `script, style, nav, header, footer` + `drop_selectors` |
+| 1. Extract | Parse JSON, keep only `keep_fields` per item (drops `isCache`, pagination, etc.) | `pdftotext -layout -enc UTF-8` (temp file, timeout, size cap) | goquery: read only `content`, after removing `script, style, svg, iframe, head` + `drop` selectors; images (e.g. "new" gifs) are never text |
 | 2. Canonicalize | One line per item, sorted newest-first by `createdAt` then id (content-determined, independent of API order), fields in fixed order | Unicode NFC, collapse runs of spaces, trim lines, drop empty lines | Same as PDF |
 | 3. Per-source regex | Rarely needed | Strip page numbers ("Page 3 of 7"), print timestamps | Visitor counters, "Last updated …" |
 | 4. Hash | SHA-256 of canonical text | ← same | ← same |
@@ -374,6 +374,34 @@ must not depend on response order. Pagination is handled in the differ
 
 Why `-layout`: it keeps table columns aligned, so date tables (like the
 corrigendum we saw) diff as whole rows rather than scrambled words.
+
+**The page reader** (`normalize/html.go`, built 2026-11-18). Most exam
+bodies publish notices as an ordinary web page, in two shapes:
+
+- **Notice list** (`kind: feed`, `format: html`): each element matching
+  `items` becomes one feed item in the *same canonical line format as an
+  SSC item*, so the feed differ, summaries, PDF discovery and the website
+  all work unchanged. `title` and `date` pick parts of an item; links to
+  `.pdf` files become `att: <url>` fields (discovered and watched like SSC
+  attachments), other links `link: <url>`. An item's id is a 12-hex hash of
+  its first link (`key: link`, default: a reworded headline is an *edit*)
+  or of its headline (`key: title`: a replaced PDF is the edit); items
+  sharing a key are told apart by headline. Dates are read day-first
+  (05/11/2026 is 5 November; two-digit years are not guessed) and stored as
+  RFC 3339 midnight IST, like SSC's `createdAt`. Items sort newest first,
+  keeping page order among equal or missing dates. A `windowed` list needs
+  a `date`, because scrolling is told from removal by date.
+- **Plain page** (`kind: html`): the text of `content`, one line per block
+  element, diffed line by line like a PDF.
+
+Noise is handled by selection rather than cleanup: `content`/`items` name
+the part of the page that matters, so menus, tickers, counters and "last
+updated" stamps outside it are never read. Charset is sniffed (BOM, meta
+tag, else UTF-8 if valid, else windows-1252). A selector that matches
+nothing, or a body that isn't HTML, is `ErrNotContent` (a failed check),
+never "every notice vanished". Selectors are validated when sources.yaml
+loads. Try selectors on a live page with
+`pehredaar probe -content ... -items ... -title ... -date ... <url>`.
 
 ---
 
@@ -693,8 +721,9 @@ that allow us instead (e.g. nta.ac.in for JEE/NEET), and skip anything we
 can't reach honestly. Whether the 403s depend on network or IP address is
 still to be checked from a server.
 
-What this needs from the code: an HTML normalizer (goquery, per-source
-`content_selector` / `drop_selectors`, as planned in §8), categories named
+What this needs from the code: the page reader (built 2026-11-18, §8;
+smoke-tested on nta.ac.in's "Latest @ NTA" box: 844 clean items with PDF
+links, but no visible dates, which sit only in the PDF file names), categories named
 `<body>:<feed>` for each body, and a two-level `/watch` menu (exam body →
 feed) once there are dozens of feeds. Each site gets the SSC treatment
 before it goes in sources.yaml: probe it, save fixtures, and measure noise

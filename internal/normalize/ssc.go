@@ -131,20 +131,44 @@ func (it FeedItem) canonicalLine() string {
 	if it.RedirectURL != "" {
 		parts = append(parts, "link: "+it.RedirectURL)
 	}
+	for _, l := range it.Links {
+		parts = append(parts, "link: "+l)
+	}
 	for _, a := range it.Attachments {
+		if isAbsURL(a.Path) {
+			// Page-reader attachments: the path is the URL, and a listing
+			// page doesn't say how big the file is.
+			parts = append(parts, "att: "+a.Path)
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("att: %s (%d B)", a.Path, a.Size))
 	}
 	return strings.Join(parts, " | ")
 }
 
-// attFieldRE matches the attachment field written by canonicalLine. The
-// path may itself contain spaces and parentheses, so only the trailing
-// "(N B)" is treated as the size.
-var attFieldRE = regexp.MustCompile(`^att: (.+) \(\d+ B\)$`)
+// The attachment fields written by canonicalLine: "att: path (N B)" for
+// SSC, where the path may itself contain spaces and parentheses (so only
+// the trailing "(N B)" is the size), and "att: https://..." for the page
+// reader, whose URLs are already escaped and so contain no spaces.
+var (
+	attFieldRE    = regexp.MustCompile(`^att: (.+) \(\d+ B\)$`)
+	attURLFieldRE = regexp.MustCompile(`^att: (https?://\S+)$`)
+)
 
-// AttachmentLink turns an "att: path (N B)" field of a canonical feed line
-// into the attachment's download URL. ok is false for any other field.
+func isAbsURL(s string) bool {
+	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")
+}
+
+// AttachmentLink turns an attachment field of a canonical feed line into
+// the attachment's download URL. ok is false for any other field.
 func AttachmentLink(feedURL, field string) (link string, ok bool) {
+	if m := attURLFieldRE.FindStringSubmatch(field); m != nil {
+		u, err := url.Parse(m[1])
+		if err != nil || u.Host == "" {
+			return "", false
+		}
+		return m[1], true
+	}
 	m := attFieldRE.FindStringSubmatch(field)
 	if m == nil {
 		return "", false

@@ -7,6 +7,15 @@
 #   {year}  the current year (the calendar needs it; on 1 January the URL
 #           changes, so the old year's source is disabled and a new one starts)
 #
+# Web pages (the page reader; docs/ARCHITECTURE.md §8). CSS selectors:
+#   kind: feed + format: html   a notice list; needs `items` (one element
+#                               per notice), optional `title`, `date`
+#                               (needed if windowed) and `key` (link|title)
+#   kind: html                  a plain page, diffed line by line
+#   content: <sel>              read only this part (default body)
+#   drop: [<sel>, ...]          remove these first (tickers, "new" badges)
+# Try them first: pehredaar probe -content ... -items ... -title ... <url>
+#
 # The query strings are exactly what ssc.gov.in's own front end sends
 # (verified with `pehredaar probe`, 2026-11-01). Don't hand-edit them
 # without probing first.

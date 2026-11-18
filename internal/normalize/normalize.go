@@ -49,6 +49,7 @@ type FeedItem struct {
 	StartDate   string
 	EndDate     string
 	RedirectURL string
+	Links       []string // page reader: non-PDF links, in page order
 	Attachments []Attachment
 }
 
@@ -65,7 +66,20 @@ type Rules struct {
 	// DropLines removes any canonical line matching one of these patterns,
 	// e.g. a "Visitors: 12345" counter or a print timestamp.
 	DropLines []*regexp.Regexp
+
+	// Format is how a feed is encoded: FormatSSC (the default) or
+	// FormatHTML, a notice list on a web page. Ignored for other kinds.
+	Format string
+
+	// HTML locates the content on a web page (kind html, or format html).
+	HTML HTMLRules
 }
+
+// Feed formats.
+const (
+	FormatSSC  = "ssc"
+	FormatHTML = "html"
+)
 
 // defaultPDFDrops are noise lines common to PDFs regardless of source.
 var defaultPDFDrops = []*regexp.Regexp{
@@ -91,13 +105,18 @@ func (n *Normalizer) Normalize(ctx context.Context, src store.Source, body []byt
 	)
 	switch src.Kind {
 	case store.KindFeed:
-		// SSC is the only feed format so far. When a second exam family
-		// arrives, sources.yaml grows a `format:` field and we switch on it.
-		doc, err = normalizeSSCFeed(body, src.URL, rules)
+		switch rules.Format {
+		case "", FormatSSC:
+			doc, err = normalizeSSCFeed(body, src.URL, rules)
+		case FormatHTML:
+			doc, err = normalizeHTMLList(body, src.URL, rules)
+		default:
+			err = fmt.Errorf("normalize: unknown feed format %q", rules.Format)
+		}
 	case store.KindPDF:
 		doc, err = n.normalizePDF(ctx, body, rules)
 	case store.KindHTML:
-		err = errors.New("normalize: html sources are not implemented yet")
+		doc, err = normalizeHTMLPage(body, src.URL, rules)
 	default:
 		err = fmt.Errorf("normalize: unknown source kind %q", src.Kind)
 	}

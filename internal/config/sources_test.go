@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/akkuraina/pehredaar/internal/normalize"
 	"github.com/akkuraina/pehredaar/internal/store"
 	"github.com/akkuraina/pehredaar/internal/store/sqlite"
 )
@@ -98,6 +99,45 @@ sources:
 	}
 }
 
+func TestPageReaderKeys(t *testing.T) {
+	s, err := ParseSources([]byte(`
+sources:
+  - label: Example notices
+    kind: feed
+    format: html
+    category: x:notices
+    languages: [en]
+    url: https://example.test/notices
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+    content: main
+    drop: [".new-gif", "#ticker"]
+    items: "table#notices tbody tr"
+    title: td.t
+    date: td.d
+    key: title
+  - label: Example dates page
+    kind: html
+    category: x:dates
+    languages: [en]
+    url: https://example.test/dates
+    interval: 1h
+    content: "#content"
+`), testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, page := s.List[0].Rules, s.List[1].Rules
+	if feed.Format != normalize.FormatHTML || feed.HTML.Items != "table#notices tbody tr" ||
+		feed.HTML.Date != "td.d" || feed.HTML.Key != normalize.KeyTitle || len(feed.HTML.Drop) != 2 {
+		t.Errorf("feed rules = %+v", feed)
+	}
+	if page.Format != "" || page.HTML.Content != "#content" {
+		t.Errorf("page rules = %+v", page)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	const ok = "    kind: feed\n    category: c\n    languages: [en]\n    url: https://example.test/a\n    interval: 15m\n"
 	tests := map[string]string{
@@ -113,6 +153,15 @@ func TestParseErrors(t *testing.T) {
 		"windowed pdf":        "sources:\n  - label: A\n    kind: pdf\n    category: c\n    languages: [en]\n    url: https://example.test/a\n    interval: 15m\n    windowed: true\n",
 		"duplicate url":       "sources:\n  - label: A\n" + ok + "  - label: B\n" + ok,
 		"empty":               "sources: []\n",
+
+		// The page reader's keys are only accepted where they're used.
+		"unknown format":        "sources:\n  - label: A\n" + ok + "    format: rss\n",
+		"format on a pdf":       "sources:\n  - label: A\n    kind: pdf\n    category: c\n    languages: [en]\n    url: https://example.test/a\n    interval: 15m\n    format: html\n",
+		"html feed no items":    "sources:\n  - label: A\n" + ok + "    format: html\n",
+		"items on an ssc feed":  "sources:\n  - label: A\n" + ok + "    items: li\n",
+		"items on a page":       "sources:\n  - label: A\n    kind: html\n    category: c\n    languages: [en]\n    url: https://example.test/a\n    interval: 15m\n    items: li\n",
+		"bad selector":          "sources:\n  - label: A\n" + ok + "    format: html\n    items: 'li['\n",
+		"windowed without date": "sources:\n  - label: A\n" + ok + "    format: html\n    items: li\n    windowed: true\n",
 	}
 	for name, yml := range tests {
 		t.Run(name, func(t *testing.T) {
