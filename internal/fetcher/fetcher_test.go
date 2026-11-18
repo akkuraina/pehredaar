@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,6 +202,67 @@ func TestTimeoutIsTemporary(t *testing.T) {
 	_, err := f.Fetch(t.Context(), Request{URL: srv.URL + "/slow"})
 	if KindOf(err) != Temporary {
 		t.Errorf("err = %v, want Temporary", err)
+	}
+}
+
+// dropFirst closes the connection without answering on the first request
+// to each path, like a server that drops a TLS handshake now and then.
+func dropFirst(t *testing.T, h http.HandlerFunc) (*httptest.Server, *sync.Map) {
+	t.Helper()
+	var hits sync.Map // path -> *atomic.Int32
+	srv := server(t, func(w http.ResponseWriter, r *http.Request) {
+		n, _ := hits.LoadOrStore(r.URL.Path, new(atomic.Int32))
+		if n.(*atomic.Int32).Add(1) == 1 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			return
+		}
+		h(w, r)
+	})
+	return srv, &hits
+}
+
+func hitCount(hits *sync.Map, path string) int32 {
+	n, ok := hits.Load(path)
+	if !ok {
+		return 0
+	}
+	return n.(*atomic.Int32).Load()
+}
+
+func TestDroppedConnectionIsRetriedOnce(t *testing.T) {
+	srv, hits := dropFirst(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte("ok"))
+	})
+	resp, err := newTestFetcher().Fetch(t.Context(), Request{URL: srv.URL + "/feed"})
+	if err != nil {
+		t.Fatalf("dropped connections (robots.txt and the page) should be retried: %v", err)
+	}
+	if string(resp.Body) != "ok" || hitCount(hits, "/feed") != 2 || hitCount(hits, "/robots.txt") != 2 {
+		t.Errorf("body %q, hits feed=%d robots=%d", resp.Body, hitCount(hits, "/feed"), hitCount(hits, "/robots.txt"))
+	}
+}
+
+func TestHTTPErrorsAreNotRetried(t *testing.T) {
+	var hits atomic.Int32
+	srv := server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		hits.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	_, err := newTestFetcher().Fetch(t.Context(), Request{URL: srv.URL + "/feed"})
+	if KindOf(err) != Temporary || hits.Load() != 1 {
+		t.Errorf("err = %v, hits = %d; want Temporary after exactly 1 request", err, hits.Load())
 	}
 }
 

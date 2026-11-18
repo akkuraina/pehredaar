@@ -55,7 +55,7 @@ func (f *Fetcher) fetchRobots(ctx context.Context, h *hostState, u *url.URL) (*r
 	}
 	req.Header.Set("User-Agent", f.cfg.UserAgent)
 
-	resp, err := f.client.Do(req)
+	resp, err := f.send(ctx, h, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, 0, ctx.Err()

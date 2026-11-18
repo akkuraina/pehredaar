@@ -168,6 +168,25 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (*Response, error) {
 	return f.do(ctx, h, req)
 }
 
+// send performs one request, retrying once when the connection itself
+// fails (refused, reset, a broken TLS handshake). Some government servers
+// drop a share of handshakes (ibps.in, seen 2026-11-18), and a second try a
+// moment later usually works; without it, every such blip costs a whole
+// backoff period. The retry waits for the host's rate limit like any other
+// request. HTTP error statuses are answers, not failures, and are never
+// retried here.
+func (f *Fetcher) send(ctx context.Context, h *hostState, req *http.Request) (*http.Response, error) {
+	resp, err := f.client.Do(req)
+	if err == nil || ctx.Err() != nil {
+		return resp, err
+	}
+	if werr := h.limiter.Wait(ctx); werr != nil {
+		return nil, err
+	}
+	// GET requests have no body, so the request can simply be sent again.
+	return f.client.Do(req.Clone(ctx))
+}
+
 func (f *Fetcher) do(ctx context.Context, h *hostState, req Request) (*Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
 	if err != nil {
@@ -182,7 +201,7 @@ func (f *Fetcher) do(ctx context.Context, h *hostState, req Request) (*Response,
 		httpReq.Header.Set("If-Modified-Since", req.LastModified)
 	}
 
-	resp, err := f.client.Do(httpReq)
+	resp, err := f.send(ctx, h, httpReq)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err() // we're shutting down; not the site's fault
