@@ -186,7 +186,7 @@ func TestLandingShowsRealCatches(t *testing.T) {
 			t.Errorf("landing is missing %q", want)
 		}
 	}
-	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self' https://akanksharaina.vercel.app;") {
 		t.Errorf("CSP = %q", csp)
 	}
 }
