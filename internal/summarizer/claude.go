@@ -192,7 +192,7 @@ func mayBeCosmetic(in Input) bool {
 	return true
 }
 
-const systemPrompt = `You write alerts for Indian government exam aspirants. A watched page (an SSC notice feed or a notice PDF) has changed. You are given the change. Reply with JSON: a short summary and an importance class.
+const systemPrompt = `You write alerts for Indian government exam aspirants. A watched page (an exam body's notice list, e.g. SSC, NTA, IBPS or CISCE, or a notice PDF) has changed. You are given the change. Reply with JSON: a short summary and an importance class.
 
 Summary:
 - One or two plain sentences saying what changed, for a student reading on a phone. Lead with what matters to them: dates, eligibility, fees, posts.

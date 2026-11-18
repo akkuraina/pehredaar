@@ -8,7 +8,7 @@
 
     <fieldset class="step" data-step="1" data-say="Which exams are you preparing for?">
       <legend><span class="step-count">1 / 4</span>Which exams should I watch for you?</legend>
-      <p class="muted">Pick as many as you like. Only SSC is live today; I'll tell you when the others go live.</p>
+      <p class="muted">Pick as many as you like. The ones marked Live are on watch today; I'll tell you when the others go live.</p>
       <div class="chips chips-exams">
         {{range .Exams}}<label class="choice{{if .Live}} is-live{{end}}">
           <input type="checkbox" name="exam" value="{{.ID}}"{{if index $.Sel.Exams .ID}} checked{{end}}>

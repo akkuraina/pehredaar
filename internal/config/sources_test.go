@@ -20,9 +20,10 @@ func TestRepoSourcesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 6 feeds in English; only 3 of them exist in Hindi.
-	if len(s.List) != 9 {
-		t.Errorf("got %d sources, want 9", len(s.List))
+	// SSC: 6 feeds in English, only 3 of them in Hindi. Web pages: NTA
+	// (JEE, NEET), IBPS, CISCE, English only.
+	if len(s.List) != 13 {
+		t.Errorf("got %d sources, want 13", len(s.List))
 	}
 	langs := map[store.Language]int{}
 	for _, src := range s.List {
@@ -38,7 +39,7 @@ func TestRepoSourcesFile(t *testing.T) {
 			t.Errorf("%s should be windowed", src.Label)
 		}
 	}
-	if langs[store.LangEnglish] != 6 || langs[store.LangHindi] != 3 {
+	if langs[store.LangEnglish] != 10 || langs[store.LangHindi] != 3 {
 		t.Errorf("languages = %v", langs)
 	}
 }

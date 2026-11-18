@@ -23,7 +23,7 @@ has caught.
 Status: milestones 1–6 of the [build plan](docs/ARCHITECTURE.md#17-build-milestones)
 are done, plus the public website and email alerts
 ([architecture §20](docs/ARCHITECTURE.md#20-public-website-and-email-built-2026-11-17)).
-It runs on a developer machine and has not been deployed for the public yet.
+It is deployed at https://pehredaar.in (Render).
 
 **Watches 9 SSC feeds** (from `ssc.gov.in`'s own JSON API):
 
@@ -35,6 +35,20 @@ It runs on a developer machine and has not been deployed for the public yet.
 | Answer Keys | ✅ | ✅ | 30 min |
 | Results | ✅ | ✅ | 30 min |
 | Tentative Vacancies | ✅ | (empty) | 1 h |
+
+**And 4 notice pages from other exam bodies** (read by the page reader,
+[architecture §8](docs/ARCHITECTURE.md#8-normalization-and-noise-filtering)):
+
+| Exam | Source | Notes |
+|---|---|---|
+| JEE Main | nta.ac.in, "Latest @ NTA" box | jeemain.nta.nic.in blocks bots; filtered to JEE, newest 15 |
+| NEET UG | nta.ac.in, same box | neet.nta.nic.in blocks bots; filtered to NEET, newest 15 |
+| IBPS | ibps.in, CRP updates | PO, SO, Clerk, RRB |
+| ICSE / ISC | cisce.org, notifications archive | tenders filtered out |
+
+All English, checked every 30 min. UPSC (and NDA, CDS) and CBSE block
+Pehredaar's User-Agent, and we don't disguise it
+([§19](docs/ARCHITECTURE.md#19-beyond-ssc-decided-2026-11-17-not-built-yet)).
 
 It also watches the **PDFs attached** to items in those feeds (checked every
 6 h), so an edited corrigendum PDF is caught even when the feed itself
@@ -84,7 +98,7 @@ Run `pehredaar run` and open http://127.0.0.1:8788.
 | Page | What it does |
 |---|---|
 | Home (`/`) | The owl (its eyes follow your pointer), a live "watching now" pulse, a real old → new catch animated, and a ticker of caught changes that updates by itself |
-| Join (`/join`) | Four questions, one at a time: which exams (SSC is live; the rest are "coming soon"), which kinds of notices, Telegram / email / both, English or Hindi |
+| Join (`/join`) | Four questions, one at a time: which exams (SSC, JEE, NEET, IBPS and ICSE/ISC are live; the rest are "coming soon"), which kinds of notices, Telegram / email / both, English or Hindi |
 | Your watch (`/feed`) | Changes caught for your feeds (new ones appear live), what the official notice board lists right now, "coming soon" exams, your channels, and "delete everything about me" |
 | Sign in (`/login`) | No passwords: an emailed link, or `/feed` in the Telegram bot |
 | A change (`/c/<id>`) | One change in full, with the official PDF; linked from alert emails |

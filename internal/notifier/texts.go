@@ -38,7 +38,7 @@ const chooseLanguage = "Choose your alert language:\nअलर्ट की भ�
 var textsEN = texts{
 	chooseLanguage: chooseLanguage,
 	languageSet:    "Alerts will be in English.\n\nNow choose what to watch: /watch",
-	help: "🦉 <b>Pehredaar</b> here. I watch SSC notices day and night and tell you the moment " +
+	help: "🦉 <b>Pehredaar</b> here. I watch official exam notices (SSC, JEE, NEET, IBPS, ICSE/ISC) day and night and tell you the moment " +
 		"something changes: new notices, revised dates, corrigenda. I don't blink. You don't have to.\n\n" +
 		"/watch: choose feeds to watch\n" +
 		"/list: what you're watching\n" +
@@ -69,7 +69,7 @@ var textsEN = texts{
 var textsHI = texts{
 	chooseLanguage: chooseLanguage,
 	languageSet:    "अलर्ट हिन्दी में आएंगे।\n\nअब चुनें कि किस पर नज़र रखनी है: /watch",
-	help: "🦉 <b>पहरेदार</b> हाज़िर है। मैं दिन-रात SSC की सूचनाओं पर नज़र रखता हूँ और कुछ भी बदलते ही बताता हूँ: " +
+	help: "🦉 <b>पहरेदार</b> हाज़िर है। मैं दिन-रात परीक्षाओं (SSC, JEE, NEET, IBPS, ICSE/ISC) की आधिकारिक सूचनाओं पर नज़र रखता हूँ और कुछ भी बदलते ही बताता हूँ: " +
 		"नई सूचनाएं, बदली हुई तारीखें, शुद्धिपत्र।\n\n" +
 		"/watch: फ़ीड चुनें\n" +
 		"/list: आप किन फ़ीड पर नज़र रख रहे हैं\n" +

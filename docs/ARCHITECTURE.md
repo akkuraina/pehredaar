@@ -394,6 +394,18 @@ bodies publish notices as an ordinary web page, in two shapes:
 - **Plain page** (`kind: html`): the text of `content`, one line per block
   element, diffed line by line like a PDF.
 
+More list settings, for pages that mix exams or list their whole history
+(NTA's box does both): `include` / `exclude` (regexes on the headline),
+`link_date` (a regex whose group captures `YYYYMMDD[hhmm[ss]]` from the
+item's first link, for pages that show no dates; NTA's file names are
+`Notice_20261117205801.pdf`) and `max_items` (keep the newest N; needs
+dates and `windowed`, so the oldest dropping out isn't a removal). A two-
+digit year is read only after a month name ("01 Jul 26", IBPS). An
+item that is itself the link (`<a href><div>date</div>…</a>`) counts its
+own href. Two sources may read one page through different filters: the
+URL then carries a distinguishing `#fragment` (`https://nta.ac.in/#jee-main`),
+which is never sent to the server.
+
 Noise is handled by selection rather than cleanup: `content`/`items` name
 the part of the page that matters, so menus, tickers, counters and "last
 updated" stamps outside it are never read. Charset is sniffed (BOM, meta
@@ -586,7 +598,7 @@ before trusting the pipeline.
 
 | Situation | Behavior |
 |---|---|
-| Timeout, 5xx, connection error | Temporary. Exponential backoff on `next_check_at` (×2, capped at 6h), `consecutive_failures++` |
+| Timeout, 5xx, connection error | Temporary. Exponential backoff on `next_check_at` (×2, capped at 6h), `consecutive_failures++`. A connection-level failure (refused, reset, broken TLS handshake) is first retried once, after the host's rate-limit gap: ibps.in drops roughly one handshake in four |
 | 429 / 503 with `Retry-After` | Honor `Retry-After` (capped) and slow that host's limiter |
 | 403 / suspected block | Treat as temporary with long backoff. Log loudly |
 | 404 / 410 | After 5 consecutive failures (the last a 404/410) → disable, reason `gone`, log. About a day with the 6h backoff |
@@ -696,6 +708,16 @@ operator can watch the pipeline work while it is being built and run.
 ---
 
 ## 19. Beyond SSC (decided 2026-11-17, not built yet)
+
+**Live since 2026-11-18:** JEE Main and NEET UG (nta.ac.in's "Latest @
+NTA" box, filtered per exam), IBPS (CRP updates) and ICSE/ISC (CISCE
+notifications archive). Each was probed, fetched twice 3 minutes apart
+(identical canonical text), and saved as a stripped fixture that
+`config/pages_test.go` checks the sources.yaml rules against. nta.ac.in's
+own category pages (`/Engineeringexam`, `/medicalexam`) are static
+descriptions, not notice lists. cisce.org's robots.txt allows all bots
+except AI crawlers; Pehredaar fetches notices to tell people about
+changes and isn't one.
 
 Target bodies: UPSC (incl. NDA, CDS), IBPS, Services Selection Board
 (officer selection), NTA (JEE Main, NEET), CBSE, CISCE, CLAT (Consortium of

@@ -81,3 +81,82 @@ sources:
     interval: 1h
     windowed: true
     discover_attachments: true
+
+# --- Web pages, read by the page reader (checked 2026-11-18) ---------------
+#
+# NTA: jeemain.nta.nic.in and neet.nta.nic.in answer 403 to Pehredaar, so
+# JEE and NEET come from the "Latest @ NTA" box on nta.ac.in, which lists
+# every NTA exam (its whole history, ~840 notices). Each source filters it
+# by headline and keeps the newest 15. The box shows no dates; the PDF file
+# names carry a timestamp (Notice_20261117205801.pdf). Both sources fetch
+# the same page: the #fragment only keeps their URLs distinct (it is never
+# sent to the server). robots.txt: 404 (no restrictions).
+
+  - label: JEE Main notices (NTA)
+    kind: feed
+    format: html
+    category: jee:nta-notices
+    languages: [en]
+    url: https://nta.ac.in/#jee-main
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+    content: marquee.latestPart
+    items: p
+    title: content
+    link_date: '(?i)Notice_(\d{14})\.pdf'
+    include: '\bJEE\b|Joint Entrance Examination'
+    exclude: '(?i)NCHM|Hotel Management' # NCHM JEE is the hotel-management exam
+    max_items: 15
+
+  - label: NEET UG notices (NTA)
+    kind: feed
+    format: html
+    category: neet:nta-notices
+    languages: [en]
+    url: https://nta.ac.in/#neet-ug
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+    content: marquee.latestPart
+    items: p
+    title: content
+    link_date: '(?i)Notice_(\d{14})\.pdf'
+    include: '\bNEET\b|National Eligibility[- ]cum[- ]Entrance'
+    max_items: 15
+
+# IBPS: "CRP Updates" lists notices for every Common Recruitment Process
+# (PO, SO, Clerk, RRB), newest first, each a link wrapping a date
+# ("01 Jul 26") and a headline. robots.txt: 404. The server's TLS is
+# flaky at times; failed checks just back off.
+
+  - label: IBPS CRP updates
+    kind: feed
+    format: html
+    category: ibps:crp-updates
+    languages: [en]
+    url: https://www.ibps.in/index.php/crp-updates/
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+    items: 'a:has(.detail-section)'
+    title: .detail-second-heading
+    date: .detail-first-heading
+
+# CISCE (ICSE / ISC): the notifications archive, page 1 (~17 newest). It
+# also lists tenders (RFP, EOI), which aren't for students. robots.txt
+# allows all bots except AI crawlers.
+
+  - label: CISCE notifications
+    kind: feed
+    format: html
+    category: cisce:notifications
+    languages: [en]
+    url: https://cisce.org/notifications-archive/
+    interval: 30m
+    windowed: true
+    discover_attachments: true
+    items: .e-loop-item.type-notification
+    title: h5
+    date: .elementor-icon-list-text
+    exclude: '(?i)^RFP\b|\bEOI\b|Expression of Interest|\btender'
