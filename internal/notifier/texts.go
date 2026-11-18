@@ -27,6 +27,10 @@ type texts struct {
 	linkedNothingLive string
 	feedLink          string // fmt verb: the sign-in link
 	noSite            string
+
+	launch       string // fmt verb: exam names (HTML-escaped)
+	launchButton string // fmt verb: exam names
+	launchDone   string // fmt verb: exam names (HTML-escaped)
 }
 
 // linkExpired is shown before a language is chosen, so it is bilingual.
@@ -63,7 +67,11 @@ var textsEN = texts{
 	linked:            "🦉 Linked! I'll message you here the moment any of these change:",
 	linkedNothingLive: "(None of your exams are live yet. I'll tell you here when they are.)",
 	feedLink:          "👀 Your live feed: %s\n\nThis link signs you in once and works for 30 minutes.",
-	noSite:            "The website isn't available right now. Your alerts still come here.",
+	launch: "🦉 Good news: I'm now watching <b>%s</b> notices. You asked me to tell you when I started.\n\n" +
+		"Want them in your alerts? One tap:",
+	launchButton: "👀 Start watching %s",
+	launchDone:   "Done. I'm watching %s for you now. 🦉\n\n/list shows everything I watch for you; /stop to change it.",
+	noSite:       "The website isn't available right now. Your alerts still come here.",
 }
 
 var textsHI = texts{
@@ -94,7 +102,11 @@ var textsHI = texts{
 	linked:            "🦉 जुड़ गया! इनमें से कुछ भी बदलते ही मैं यहीं बताऊँगा:",
 	linkedNothingLive: "(आपकी परीक्षाएं अभी लाइव नहीं हैं। लाइव होते ही यहीं बताऊँगा।)",
 	feedLink:          "👀 आपकी लाइव फ़ीड: %s\n\nयह लिंक एक बार, 30 मिनट तक चलेगा।",
-	noSite:            "वेबसाइट अभी उपलब्ध नहीं है। आपके अलर्ट यहीं आते रहेंगे।",
+	launch: "🦉 खुशखबरी: अब मैं <b>%s</b> की सूचनाओं पर भी नज़र रखता हूँ। आपने कहा था कि शुरू होते ही बताऊँ।\n\n" +
+		"क्या इन्हें आपके अलर्ट में जोड़ूँ? बस एक टैप:",
+	launchButton: "👀 %s देखना शुरू करें",
+	launchDone:   "हो गया। अब मैं आपके लिए %s पर नज़र रख रहा हूँ। 🦉\n\n/list में सब कुछ है; बदलने के लिए /stop।",
+	noSite:       "वेबसाइट अभी उपलब्ध नहीं है। आपके अलर्ट यहीं आते रहेंगे।",
 }
 
 func textsFor(lang store.Language) texts {

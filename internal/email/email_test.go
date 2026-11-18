@@ -188,3 +188,43 @@ func TestLinkEmails(t *testing.T) {
 		t.Error("a confirmation email has nothing to unsubscribe from")
 	}
 }
+
+func TestAnnounce(t *testing.T) {
+	s, f := newSender(t)
+	l := notifier.Launch{
+		ExamIDs: []string{"jee", "neet"}, Names: []string{"JEE", "NEET"},
+		Link: "https://pehredaar.test/start/jee,neet/9.sig", Lang: store.LangEnglish,
+	}
+	if err := s.Announce(t.Context(), recipient, l); err != nil {
+		t.Fatal(err)
+	}
+	r, m := f.reqs[0], f.bodyOf[0]
+	if r.Header.Get("Idempotency-Key") != "launch-9-jee-neet" {
+		t.Errorf("idempotency key = %q", r.Header.Get("Idempotency-Key"))
+	}
+	if m.Subject != "🦉 Now watching JEE and NEET for you" || m.Headers["List-Unsubscribe"] == "" {
+		t.Errorf("subject %q, headers %v", m.Subject, m.Headers)
+	}
+	for _, want := range []string{"I'm watching JEE and NEET now", `href="https://pehredaar.test/start/jee,neet/9.sig"`, "only mention this once"} {
+		if !strings.Contains(m.HTML, want) {
+			t.Errorf("HTML is missing %q", want)
+		}
+	}
+	if !strings.Contains(m.Text, "https://pehredaar.test/start/jee,neet/9.sig") {
+		t.Errorf("text part:\n%s", m.Text)
+	}
+
+	l.Lang = store.LangHindi
+	if err := s.Announce(t.Context(), recipient, l); err != nil {
+		t.Fatal(err)
+	}
+	if m := f.bodyOf[1]; !strings.Contains(m.Subject, "JEE और NEET") || !strings.Contains(m.HTML, "देखना शुरू करें") {
+		t.Errorf("Hindi: subject %q", m.Subject)
+	}
+
+	tg := recipient
+	tg.Channel = store.ChannelTelegram
+	if err := s.Announce(t.Context(), tg, l); err == nil {
+		t.Error("Announce accepted a Telegram contact")
+	}
+}

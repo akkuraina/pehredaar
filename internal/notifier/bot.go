@@ -239,13 +239,17 @@ func (b *Bot) Deliver(ctx context.Context, to store.Recipient, a Alert) error {
 // retrying on flood control and network errors. It returns ErrBlocked if
 // the user has blocked the bot.
 func (b *Bot) Send(ctx context.Context, chatID int64, a Alert) error {
-	params := &bot.SendMessageParams{
+	return b.sendParams(ctx, chatID, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      a.html(),
 		ParseMode: models.ParseModeHTML,
 		// A preview of a PDF link is a grey box with a file name: noise.
 		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: bot.True()},
-	}
+	})
+}
+
+// sendParams sends one message with Send's rate limiting and retries.
+func (b *Bot) sendParams(ctx context.Context, chatID int64, params *bot.SendMessageParams) error {
 	var err error
 	for attempt := 1; attempt <= maxSendAttempts; attempt++ {
 		if err := b.wait(ctx, chatID); err != nil {

@@ -80,6 +80,7 @@ internal/
   exams/        # exam catalog for the survey (live vs coming soon)
   web/          # public website: landing, survey, sign-in, live feed
   outbox/       # pending changes → summaries → alerts (one Sender per channel)
+  launch/       # "now live" messages to people who asked about an exam
   store/        # DB access (interface + SQLite impl)
   scheduler/    # polling loop
   config/       # sources.yaml loading + sync
@@ -119,6 +120,7 @@ Port 8080 is taken by a local Apache on the dev machine, hence 8787.
 - `subscribers` (a person) and `contacts` (telegram or email; verified, active)
 - `subscriptions` (exactly one of source or category), `interests` (exams)
 - `deliveries` (change × contact), `tokens` (hashed one-time links), `settings`
+- `exam_launches` (when an exam went live), `launch_notices` (who was told)
 
 ## Build order
 

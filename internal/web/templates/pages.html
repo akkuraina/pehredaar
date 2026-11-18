@@ -56,6 +56,22 @@
 </section>
 {{template "foot" .}}{{end}}
 
+{{define "start"}}{{template "head" .}}
+<section class="center-card reveal">
+  {{if .Done}}
+    {{template "owl" "happy"}}
+    <h1>I'm watching {{.Names}} for you</h1>
+    <p class="lede">New and changed notices will reach you the way you chose when you signed up. You can stop any time.</p>
+    {{if .Signed}}<a class="btn btn-amber" href="/feed">Open your watch →</a>{{else}}<a class="btn btn-amber" href="/login">Sign in to see your feed →</a>{{end}}
+  {{else}}
+    {{template "owl" "alert"}}
+    <h1>Start watching {{.Names}}?</h1>
+    <p class="lede">I'll add their official notices to your alerts, the way you chose when you signed up.</p>
+    <form method="post" action="{{.Action}}"><button class="btn btn-amber btn-lg">Yes, start watching</button></form>
+  {{end}}
+</section>
+{{template "foot" .}}{{end}}
+
 {{define "privacy"}}{{template "head" .}}
 <section class="prose reveal">
   <h1>Privacy, in plain words</h1>

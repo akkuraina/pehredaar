@@ -35,6 +35,12 @@ type alertData struct {
 	HasChangeID bool
 }
 
+type launchData struct {
+	page
+	Names string // "JEE and NEET"
+	Link  string
+}
+
 type linkData struct {
 	page
 	Link string
@@ -80,6 +86,13 @@ const htmlBase = `{{define "top"}}<!doctype html>
 <p style="font-size:12px;color:#6b6f80;margin:20px 0 0;">{{if .Hindi}}यह लिंक 48 घंटे चलेगा। अगर आपने साइन-अप नहीं किया, तो इस ईमेल को अनदेखा करें।{{else}}This link works for 48 hours. Didn't sign up? Ignore this email and nothing happens.{{end}}</p>
 {{template "bottom" .}}{{end}}
 
+{{define "launch"}}{{template "top" .}}
+<p style="font-size:20px;font-weight:700;margin:0 0 10px;">{{if .Hindi}}अब {{.Names}} पर भी मेरी नज़र है 👀{{else}}I'm watching {{.Names}} now 👀{{end}}</p>
+<p style="font-size:15px;line-height:1.6;margin:0 0 20px;">{{if .Hindi}}साइन-अप के समय आपने कहा था कि {{.Names}} शुरू होते ही बताऊँ। अब मैं इनकी आधिकारिक सूचनाएं हर कुछ मिनट में पढ़ता हूँ। क्या इन्हें आपके अलर्ट में जोड़ूँ?{{else}}When you signed up, you asked me to tell you when I started on {{.Names}}. I now read their official notices every few minutes. Want them in your alerts?{{end}}</p>
+<a href="{{.Link}}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:#ffb547;color:#141a2e;font-weight:700;text-decoration:none;font-size:15px;">{{if .Hindi}}देखना शुरू करें{{else}}Start watching{{end}}</a>
+<p style="font-size:12px;color:#6b6f80;margin:20px 0 0;">{{if .Hindi}}यह ईमेल सिर्फ़ एक बार आया है। अनदेखा करें तो कुछ नहीं बदलेगा।{{else}}I'll only mention this once. Ignore it and nothing changes.{{end}}</p>
+{{template "bottom" .}}{{end}}
+
 {{define "login"}}{{template "top" .}}
 <p style="font-size:20px;font-weight:700;margin:0 0 10px;">{{if .Hindi}}वापसी पर स्वागत है 🦉{{else}}Welcome back 🦉{{end}}</p>
 <p style="font-size:15px;line-height:1.6;margin:0 0 20px;">{{if .Hindi}}अपनी फ़ीड खोलने के लिए नीचे टैप करें।{{else}}Tap below to open your feed.{{end}}</p>
@@ -102,6 +115,12 @@ const textBase = `{{define "foot"}}
 
 {{define "confirm"}}{{if .Hindi}}अपना ईमेल कन्फ़र्म करें (48 घंटे तक मान्य):{{else}}Confirm your email (link works for 48 hours):{{end}}
 {{.Link}}
+{{template "foot" .}}{{end}}
+
+{{define "launch"}}{{if .Hindi}}अब {{.Names}} पर भी मेरी नज़र है। देखना शुरू करें:{{else}}I'm watching {{.Names}} now, as you asked when you signed up. Start watching:{{end}}
+{{.Link}}
+
+{{if .Hindi}}यह ईमेल सिर्फ़ एक बार आया है।{{else}}I'll only mention this once.{{end}}
 {{template "foot" .}}{{end}}
 
 {{define "login"}}{{if .Hindi}}साइन इन करें (30 मिनट, एक बार):{{else}}Sign in (works once, for 30 minutes):{{end}}

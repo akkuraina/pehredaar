@@ -823,10 +823,31 @@ plain-text part, in English or Hindi.
 
 **Not done yet:**
 
-- A sending domain. Until one is verified in Resend, it only delivers to the
-  account owner's address (the default sender is `onboarding@resend.dev`).
 - Bounce and complaint webhooks from Resend (to deactivate dead addresses).
   They need a public URL; until then, unsubscribing is the only automatic path.
 - The site's own UI is English; Hindi is used for alerts and the bot.
 - Fonts load from Google Fonts (disclosed on `/privacy`); self-hosting them
   would remove that third party.
+
+**"Now live" messages** (package `launch`, built 2026-11-18). The survey
+promises "I'll tell you when the others go live"; this keeps it, once.
+
+- `exam_launches` holds when each exam first went live: SSC is seeded as
+  live from the start; others are recorded the first time the announcer
+  sees enabled sources for them (in practice: the deploy that adds them).
+- Told: people who chose the exam *before* that moment, have a verified,
+  active contact, and don't already subscribe to any of its feeds.
+  Someone who picks a live exam is subscribed by the survey directly.
+  `SetInterests` keeps the original `created_at` of exams that stay
+  selected, so re-saving the survey doesn't make an old wish look new.
+- One message per person covering every newly live exam, on each channel
+  that has a sender. `launch_notices` is written before sending (like
+  deliveries): a crash loses a message rather than repeating it. People
+  with no usable channel are not marked, so they're told once they confirm
+  an email or the server gains a channel. Runs at startup, then hourly.
+- Telegram: a "Start watching ..." button (`live:jee,neet`) subscribes to
+  every live feed of those exams in one tap.
+- Email: the button opens `/start/{exams}/{signed}`, which only asks; its
+  POST subscribes. Mail scanners open links, so a GET must change
+  nothing. The signature covers the subscriber id and the exact exam
+  list (purpose `launch:<exams>`), and the link doesn't sign anyone in.

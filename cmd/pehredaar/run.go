@@ -20,6 +20,7 @@ import (
 	"github.com/akkuraina/pehredaar/internal/dashboard"
 	"github.com/akkuraina/pehredaar/internal/email"
 	"github.com/akkuraina/pehredaar/internal/fetcher"
+	"github.com/akkuraina/pehredaar/internal/launch"
 	"github.com/akkuraina/pehredaar/internal/normalize"
 	"github.com/akkuraina/pehredaar/internal/notifier"
 	"github.com/akkuraina/pehredaar/internal/outbox"
@@ -188,9 +189,28 @@ func runServe(ctx context.Context, args []string) error {
 		Categories: sources.Categories(),
 		Logger:     log,
 	})
+	// Tells people who asked about an exam in the survey when it goes
+	// live: at startup (deploys are when exams go live), then hourly.
+	launchSenders := map[store.Channel]launch.Sender{}
+	if tg != nil {
+		launchSenders[store.ChannelTelegram] = tg
+	}
+	if mailer != nil { // a nil *email.Sender in an interface isn't nil
+		launchSenders[store.ChannelEmail] = mailer
+	}
+	var liveCats []string
+	for _, c := range sources.Categories() {
+		liveCats = append(liveCats, c.ID)
+	}
+	announcer := launch.New(launch.Config{
+		Store: st, Categories: liveCats, Senders: launchSenders,
+		Signer: signer, BaseURL: *baseURL, Logger: log,
+	})
+
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sched.Run(gctx) })
 	g.Go(func() error { return proc.Run(gctx) })
+	g.Go(func() error { return announcer.Run(gctx) })
 	g.Go(func() error { return site.Hub().Run(gctx) })
 	if tg != nil {
 		g.Go(func() error { return tg.Run(gctx) })

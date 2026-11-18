@@ -135,6 +135,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /u/{signed}", s.unsubscribePage)
 	mux.HandleFunc("POST /u/{signed}", s.unsubscribe)
 	mux.HandleFunc("POST /account/delete", s.deleteAccount)
+	mux.HandleFunc("GET /start/{exams}/{signed}", s.startPage)
+	mux.HandleFunc("POST /start/{exams}/{signed}", s.limited(s.startWatching))
 	mux.HandleFunc("GET /privacy", s.privacy)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /healthz", s.healthz)

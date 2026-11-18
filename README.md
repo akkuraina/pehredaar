@@ -50,6 +50,9 @@ All English, checked every 30 min. UPSC (and NDA, CDS) and CBSE block
 Pehredaar's User-Agent, and we don't disguise it
 ([§19](docs/ARCHITECTURE.md#19-beyond-ssc-decided-2026-11-17-not-built-yet)).
 
+People who picked an exam in the survey before it went live get one
+"now watching it" message (Telegram button or email link) when it does.
+
 It also watches the **PDFs attached** to items in those feeds (checked every
 6 h), so an edited corrigendum PDF is caught even when the feed itself
 doesn't change.

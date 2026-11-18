@@ -229,6 +229,39 @@ func (s *Sender) Deliver(ctx context.Context, to store.Recipient, a notifier.Ale
 	return s.send(ctx, m, fmt.Sprintf("alert-%d-%d", a.ChangeID, to.ID))
 }
 
+// Announce tells an email contact that exams they asked about are now
+// watched. It implements launch.Sender. The button leads to a page that
+// asks before subscribing: mail scanners open every link in a message,
+// and a bare link must not change anyone's subscriptions.
+func (s *Sender) Announce(ctx context.Context, to store.Recipient, l notifier.Launch) error {
+	if to.Channel != store.ChannelEmail {
+		return fmt.Errorf("email: contact %d is %s, not email", to.ID, to.Channel)
+	}
+	unsub := s.cfg.BaseURL + "/u/" + s.cfg.Signer.SignID(UnsubscribePurpose, to.ID)
+	names := notifier.ListNames(l.Names, l.Lang)
+	data := launchData{
+		page:  page{Lang: l.Lang, BaseURL: s.cfg.BaseURL, Unsubscribe: unsub},
+		Names: names,
+		Link:  l.Link,
+	}
+	htmlBody, text, err := render("launch", data)
+	if err != nil {
+		return err
+	}
+	subject := "🦉 Now watching " + names + " for you"
+	if l.Lang == store.LangHindi {
+		subject = "🦉 अब " + names + " पर भी मेरी नज़र है"
+	}
+	return s.send(ctx, message{
+		From: s.cfg.From, To: []string{to.Address}, Subject: subject, HTML: htmlBody, Text: text,
+		Headers: map[string]string{
+			"List-Unsubscribe":      "<" + unsub + ">",
+			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+		},
+		Tags: []tag{{Name: "kind", Value: "launch"}},
+	}, fmt.Sprintf("launch-%d-%s", to.ID, strings.Join(l.ExamIDs, "-")))
+}
+
 // alertSubject is the subject line: the feed, then the start of the
 // summary, so the inbox list alone says what changed.
 func alertSubject(a notifier.Alert) string {

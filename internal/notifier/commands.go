@@ -283,6 +283,9 @@ func (c *commands) callback(ctx context.Context, u user, data string) (reply, er
 		r.toast = toast
 		return r, err
 
+	case strings.HasPrefix(data, cbLive):
+		return c.startExams(ctx, sub.ID, strings.TrimPrefix(data, cbLive), sub.Language)
+
 	case data == cbUnsub+unsubAll:
 		if err := c.unsubscribeAll(ctx, sub.ID); err != nil {
 			return reply{}, err

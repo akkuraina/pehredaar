@@ -73,6 +73,7 @@ type env struct {
 var cats = []config.Category{
 	{ID: "ssc:notice-board", Label: "SSC Notice Board"},
 	{ID: "ssc:results", Label: "SSC Results"},
+	{ID: "jee:nta-notices", Label: "JEE Main notices (NTA)"},
 }
 
 func newEnv(t *testing.T) *env {
